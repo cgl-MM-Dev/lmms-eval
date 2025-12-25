@@ -81,6 +81,7 @@ AVAILABLE_SIMPLE_MODELS = {
     "whisper": "Whisper",
     "xcomposer2_4KHD": "XComposer2_4KHD",
     "xcomposer2d5": "XComposer2D5",
+    "virtual_model": "VirtualModel",
 }
 
 AVAILABLE_CHAT_TEMPLATE_MODELS = {

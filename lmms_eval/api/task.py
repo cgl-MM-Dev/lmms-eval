@@ -93,6 +93,7 @@ class TaskConfig(dict):
     doc_to_target: Union[Callable, str] = None
     doc_to_choice: Union[Callable, str, dict, list] = None
     doc_to_messages: Callable = None
+    doc_to_answer: Union[Callable, str] = None
     process_results: Union[Callable, str] = None
     use_prompt: str = None
     description: str = ""
@@ -432,7 +433,9 @@ class Task(abc.ABC):
         if cache_requests and (not cached_instances or rewrite_requests_cache) and limit is not None:
             limit = None
 
+        # 创建 doc_id 和 doc 的迭代器
         doc_id_docs = utils.create_iterator(enumerate(self.eval_docs_no_media), rank=rank, limit=int(limit) if limit else None, world_size=world_size)
+        # 计算文档数量
         doc_iterator_for_counting = itertools.islice(range(len(self.test_docs())), rank, limit, world_size) if self.has_test_docs() else itertools.islice(range(len(self.validation_docs())), rank, limit, world_size)
 
         num_docs = sum(1 for _ in doc_iterator_for_counting)
@@ -442,6 +445,7 @@ class Task(abc.ABC):
             total=num_docs,
         ):
             # sample fewshot context #TODO: need to offset doc_id by rank now!
+            # 构建fewshot上下文
             fewshot_ctx = self.fewshot_context(
                 doc,
                 0 if self.config.num_fewshot is None else self.config.num_fewshot,
@@ -452,10 +456,12 @@ class Task(abc.ABC):
             )
 
             # TODO: we should override self.config.repeats if doing greedy gen so users don't waste time+compute
+            # 构建元数据
             per_task_metadata = {"task": self.config["task"], "doc_id": doc_id, "repeats": self.config.repeats, "split": split}
             if self.config.metadata and type(self.config.metadata) == dict:  # TODO: temporary fix for metadata loading, ignore the list of dict type.
                 per_task_metadata.update(self.config.metadata)
 
+            # 构建Instance
             inst = self.construct_requests(doc_id=doc_id, ctx=fewshot_ctx, metadata=per_task_metadata)
 
             if not isinstance(inst, list):
@@ -1410,6 +1416,37 @@ class ConfigurableTask(Task):
             return doc_to_choice.get_answer_choices_list(doc)
         else:
             raise TypeError
+        
+    def doc_to_answer(self, doc):
+        """
+        Extract pre-existing answer from document for eval_only mode.
+        Similar to doc_to_text but for retrieving stored model responses.
+        """
+        doc_to_answer = self.config.doc_to_answer
+        
+        if doc_to_answer is None:
+            raise ValueError(
+                f"Task {self.config.task} requires 'doc_to_answer' configuration "
+                "when using eval_only mode"
+            )
+        
+        if isinstance(doc_to_answer, int):
+            return str(doc_to_answer)
+        elif isinstance(doc_to_answer, str):
+            assert self.config.doc_to_answer in self.features
+            return [doc[self.config.doc_to_answer]]
+        elif callable(doc_to_answer):
+            # Custom function support
+            return (
+                doc_to_answer(doc, self.lmms_eval_specific_kwargs)
+                if self.lmms_eval_specific_kwargs is not None
+                else doc_to_answer(doc)
+            )
+        else:
+            raise TypeError(
+                f"doc_to_answer must be int, str, or callable, "
+                f"got {type(doc_to_answer)}"
+            )
 
     def construct_requests(self, doc_id: int, ctx: str, **kwargs) -> Union[List[Instance], Instance]:
         split = kwargs.get("metadata").get("split")

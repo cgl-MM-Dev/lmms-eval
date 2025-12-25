@@ -274,6 +274,15 @@ def parse_eval_args() -> argparse.Namespace:
     )
     parser.add_argument("--process_with_media", action="store_true", help="Whether you will process you dataset with audio, image. By default set to False" "In case some benchmarks need to be processed with media, set this flag to True.")
     parser.add_argument("--force_simple", action="store_true", help="Force the evaluation to use the simple mode of the models")
+    parser.add_argument(
+        "--eval_mode",
+        type=str,
+        choices=["full", "eval_only"],
+        default="full",
+        help="Evaluation mode:\n"
+             "  full: Complete inference + evaluation (default)\n"
+             "  eval_only: Evaluation only, using pre-existing results from dataset"
+    )
     args = parser.parse_args()
     return args
 
@@ -388,7 +397,8 @@ def cli_evaluate_single(args: Union[argparse.Namespace, None] = None) -> None:
 
     if args.include_path is not None:
         eval_logger.info(f"Including path: {args.include_path}")
-    task_manager = TaskManager(args.verbosity, include_path=args.include_path, model_name=args.model)
+        include_path = args.include_path.split(",")
+    task_manager = TaskManager(args.verbosity, include_path=include_path, model_name=args.model)
 
     # update the evaluation tracker args with the output path and the HF token
     if args.output_path:
@@ -511,6 +521,7 @@ def cli_evaluate_single(args: Union[argparse.Namespace, None] = None) -> None:
         distributed_executor_backend="torchrun" if (torch.distributed.is_available() and torch.distributed.is_initialized()) else "accelerate",
         force_simple=args.force_simple,
         launcher_args=args.launcher_args,
+        eval_mode=args.eval_mode,
         **request_caching_args,
     )
 

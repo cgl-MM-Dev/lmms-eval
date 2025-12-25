@@ -34,7 +34,7 @@ from lmms_eval.evaluator_utils import (
 from lmms_eval.llm_judge.launcher import get_launcher
 from lmms_eval.loggers.evaluation_tracker import EvaluationTracker
 from lmms_eval.models import get_model
-from lmms_eval.tasks import TaskManager, get_task_dict
+from lmms_eval.tasks import TaskManager, get_task_dict, Task
 from lmms_eval.utils import (
     create_iterator,
     get_datetime_str,
@@ -83,6 +83,8 @@ def simple_evaluate(
     distributed_executor_backend: str = "accelerate",
     cli_args=None,
     force_simple: bool = False,
+    eval_mode: str = "full",
+    **kwargs
 ):
     """Instantiate and evaluate a model on a list of tasks.
 
@@ -163,6 +165,19 @@ def simple_evaluate(
     assert tasks != [], "No tasks specified, or no tasks found. Please verify the task names."
 
     assert distributed_executor_backend in {"accelerate", "torchrun"}, f"Invalid distributed executor backend: {distributed_executor_backend}. Choose either 'accelerate' or 'torchrun'."
+
+    # 仅评估模式：强制使用虚拟模型
+    if eval_mode == "eval_only":
+        eval_logger.info("=" * 50)
+        eval_logger.info("In EVAL_ONLY mode, only metrics are calculated; you must provide the model outputs yourself")
+        eval_logger.info("Make sure your task YAML includes 'doc_to_answer' configuration")
+        eval_logger.info("=" * 50)
+        
+        # 覆盖模型参数
+        model = "virtual_model"
+        if model_args is None:
+            model_args = ""
+        
 
     if gen_kwargs:
         gen_kwargs = simple_parse_args_string(gen_kwargs)
@@ -281,6 +296,7 @@ def simple_evaluate(
         distributed_executor_backend=distributed_executor_backend,
         cli_args=cli_args,
         eval_server_launcher=eval_launcher,
+        eval_mode=eval_mode,
     )
 
     if global_rank == 0:
@@ -343,6 +359,7 @@ def evaluate(
     verbosity: str = "INFO",
     distributed_executor_backend: str = "accelerate",
     eval_server_launcher: Optional[Union[str, Callable]] = None,
+    eval_mode: str = "full",
     cli_args=None,
 ):
     """Instantiate and evaluate a model on a list of tasks.
@@ -488,6 +505,10 @@ def evaluate(
             numpad = max(gathered_item) - gathered_item[lm.rank]
             # todo: may not account for padding in cases like SquadV2 which has multiple req types
             padding_requests[reqtype] += numpad
+    
+    # 如果是 VirtualModel，传递任务实例
+    if eval_mode == "eval_only" and hasattr(lm, 'set_parent_tasks') and callable(lm.set_parent_tasks):
+        lm.set_parent_tasks(task_dict)
 
     ### Run LMM on inputs, get all outputs ###
     # execute each type of request
