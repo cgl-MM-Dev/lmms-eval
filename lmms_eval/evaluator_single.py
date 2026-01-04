@@ -819,9 +819,9 @@ def evaluate_streaming(
     padding_requests = collections.defaultdict(int)
     num_fewshot = collections.defaultdict(int)
     
-    # 任务初始化
+    # ========== 任务初始化 ==========
     eval_tasks = get_task_list(task_dict)
-
+    
     if distributed_executor_backend == "accelerate" and not hasattr(lm, "accelerator"):
         lm.accelerator = Accelerator()
     
@@ -913,8 +913,8 @@ def evaluate_streaming(
         # 创建共享队列
         max_queue_size = max(100, total_requests // 10)  # 最多缓存10%的结果
         evaluation_queue = queue.Queue(maxsize=max_queue_size)
-
-        # ========== 推理线程：批量推理，结果放入队列 ==========
+        
+        # 推理线程：批量推理，结果放入队列
         def inference_worker():
             """推理线程：不断推理，将结果放入队列"""         
             try:
@@ -946,7 +946,8 @@ def evaluate_streaming(
                         # 立即将每个结果放入队列
                         for resp, instance in zip(batch_resps, batch_reqs):
                             instance.resps.append(resp)
-                            evaluation_queue.put(instance)                     
+                            evaluation_queue.put(instance)
+                            pbar_inference.update(1)                       
                     except Exception as e:
                         eval_logger.error(
                             f"[Rank {RANK}] Error in batch {batch_idx + 1}: {e}"
@@ -955,8 +956,7 @@ def evaluate_streaming(
                         for instance in batch_reqs:
                             instance.resps.append("")
                             evaluation_queue.put(instance)
-                    # 更新进度条
-                    pbar_inference.update(len(batch_reqs))
+                            pbar_inference.update(1)
                 
                 pbar_inference.close()
                 evaluation_queue.put(None)
@@ -964,11 +964,11 @@ def evaluate_streaming(
                 
             except Exception as e:
                 eval_logger.error(f"[Rank {RANK}] Inference thread error: {e}")
-        
-        # ========== 评估线程：使用线程池并发评估 ==========
+
+        # ========== 评估线程：从队列取结果，立即计算指标 ==========
         def evaluation_worker():
-            """评估线程：使用线程池并发计算指标"""
-            eval_logger.info(f"[Rank {RANK}] Evaluation thread started with pool size {eval_threads}")
+            """评估线程：从队列取出结果，立即计算指标"""       
+            eval_logger.info(f"[Rank {RANK}] Evaluation thread started")
             
             # 创建进度条
             pbar_evaluation = tqdm(
@@ -978,11 +978,12 @@ def evaluate_streaming(
                 position=1
             )
             
-            # 为每个任务加载文档
+            # 为每个任务加载文档（用于指标计算）
             task_docs = {}
             for task_name, task_output in task_name_to_output.items():
                 task = task_output.task
                 
+                # 加载该任务的所有文档（作为字典，key 为 doc_id）
                 if cli_args is not None and not cli_args.process_with_media:
                     docs = list(task.eval_docs_no_media)
                 else:
@@ -990,11 +991,12 @@ def evaluate_streaming(
                 
                 task_docs[task_name] = {i: doc for i, doc in enumerate(docs)}
             
-            # 初始化每个任务的实例映射
+            # 初始化每个任务的 doc_id -> instances 映射
             for task_name, task_output in task_name_to_output.items():
                 task_output._streaming_instances_by_doc = collections.defaultdict(list)
                 task_output._streaming_expected_instances = {}
                 
+                # 统计每个 doc_id 应该有多少个 instances
                 task = task_output.task
                 for inst in task.instances:
                     doc_id = inst.doc_id
@@ -1003,132 +1005,142 @@ def evaluate_streaming(
                             1 for i in task.instances if i.doc_id == doc_id
                         )
             
-            # 用于累积同一 doc_id 的实例
-            pending_docs = collections.defaultdict(lambda: collections.defaultdict(list))
-            
-            # 单个文档的评估任务
-            def evaluate_doc(task_name, doc_id, doc_instances, doc):
-                """评估单个文档的所有实例"""
-                task_output = task_name_to_output[task_name]
-                task = task_output.task
+            # 持续从队列中取出推理结果并处理
+            while True:
+                instance = evaluation_queue.get()
                 
-                # 对实例排序
-                doc_instances.sort(key=lambda x: x.idx)
+                if instance is None:
+                    # 结束信号
+                    eval_logger.info(f"[Rank {RANK}] Evaluation thread received end signal")
+                    evaluation_queue.task_done()
+                    break
                 
-                # 遍历每个filter
-                for filter_key in doc_instances[0].filtered_resps.keys():
-                    filtered_results = [inst.filtered_resps[filter_key] for inst in doc_instances]
+                try:
+                    # ========== 立即处理该实例 ==========
+                    task_name = instance.task_name
                     
-                    try:
-                        metrics = task.process_results(doc, filtered_results)
-                        
-                        # 存储指标
-                        for metric, value in metrics.items():
-                            task_output.sample_metrics[(metric, filter_key)].append(value)
-                        
-                        if log_samples:
-                            target = task.doc_to_target(doc)
-                            saved_doc = {}
-                            for key, value in doc.items():
-                                if "image" not in key:
-                                    if isinstance(value, dict) and "array" in value:
-                                        continue
-                                    else:
-                                        saved_doc[key] = value
-                            
-                            filtered_arguments = []
-                            for inst in doc_instances:
-                                for value in inst.args:
-                                    if isinstance(value, (str, int, float, bool, list, dict, type(None))):
-                                        filtered_arguments.append(value)
-                            
-                            example = {
-                                "doc_id": doc_id,
-                                "doc": saved_doc,
-                                "target": target,
-                                "arguments": filtered_arguments,
-                                "resps": [inst.resps for inst in doc_instances],
-                                "filtered_resps": [inst.filtered_resps[filter_key] for inst in doc_instances],
-                                "doc_hash": hash_string(
-                                    json.dumps(
-                                        doc_instances[0].doc,
-                                        indent=2,
-                                        default=handle_non_serializable,
-                                        ensure_ascii=False,
-                                    )
-                                ),
-                            }
-                            example.update(metrics)
-                            task_output.logged_samples.append(example)
-                        
-                    except Exception as e:
-                        eval_logger.error(f"[Rank {RANK}] Error processing doc_id {doc_id} for task {task_name}: {e}")
-                
-                pbar_evaluation.update(1)
-            
+                    if task_name not in task_name_to_output:
+                        eval_logger.warning(f"[Rank {RANK}] Unknown task: {task_name}, skipping")
+                        evaluation_queue.task_done()
+                        continue
+                    
+                    task_output = task_name_to_output[task_name]
+                    task = task_output.task
+                    task.apply_filters()
+                    doc_id = instance.doc_id
+                    
+                    # 获取对应的文档
+                    if doc_id not in task_docs[task_name]:
+                        eval_logger.warning(f"[Rank {RANK}] Doc {doc_id} not found for task {task_name}")
+                        evaluation_queue.task_done()
+                        continue
+                    
+                    doc = task_docs[task_name][doc_id]
 
-            # 使用线程池处理评估任务
-            with ThreadPoolExecutor(max_workers=eval_threads) as pool:
-                futures = {}
-                
-                while True:
-                    instance = evaluation_queue.get()
+                    # # 获取过滤器名称
+                    # if hasattr(instance, 'filtered_resps') and instance.filtered_resps:
+                    #     filter_keys = list(instance.filtered_resps.keys())
+                    # elif hasattr(task, '_filters') and task._filters:
+                    #     # 从 task._filters 获取过滤器名称
+                    #     filter_keys = [f.name for f in task._filters]
+                    # else:
+                    #     # 默认使用 "none" 过滤器
+                    #     filter_keys = ["none"]
+
+                    # # 如果 instance 没有对应的 filtered_resps，动态应用
+                    # for filter_key in filter_keys:
+                    #     if filter_key not in instance.filtered_resps:
+                    #         if hasattr(task, '_filters') and task._filters:
+                    #             # 找到对应的过滤器并应用
+                    #             filter_ensemble = next((f for f in task._filters if f.name == filter_key), None)
+                    #             if filter_ensemble:
+                    #                 resps = [instance.resps]
+                    #                 for filter_fn in filter_ensemble.filters:
+                    #                     resps = filter_fn.apply(resps, [doc])
+                    #                 instance.filtered_resps[filter_key] = resps[0]
+                    #         else:
+                    #             # 没有过滤器，直接使用原始响应
+                    #             instance.filtered_resps[filter_key] = instance.resps[0] if instance.resps else ""
                     
-                    if instance is None:
-                        eval_logger.info(f"[Rank {RANK}] Evaluation thread received end signal")
-                        evaluation_queue.task_done()
-                        break
+                    # 累积同doc_id的instances
+                    task_output._streaming_instances_by_doc[doc_id].append(instance)
                     
-                    try:
-                        task_name = instance.task_name
+                    expected_count = task_output._streaming_expected_instances[doc_id]
+                    current_count = len(task_output._streaming_instances_by_doc[doc_id])
+                    
+                    # 如果该doc_id的所有instances都完成了，立即计算指标
+                    if current_count == expected_count:
+                        doc_instances = task_output._streaming_instances_by_doc[doc_id]
+                        doc_instances.sort(key=lambda x: x.idx)
                         
-                        if task_name not in task_name_to_output:
-                            eval_logger.warning(f"[Rank {RANK}] Unknown task: {task_name}, skipping")
-                            evaluation_queue.task_done()
-                            pbar_evaluation.update(1)
-                            continue
-                        
-                        task_output = task_name_to_output[task_name]
-                        task = task_output.task
-                        task.apply_filters()
-                        doc_id = instance.doc_id
-                        
-                        if doc_id not in task_docs[task_name]:
-                            eval_logger.warning(f"[Rank {RANK}] Doc {doc_id} not found for task {task_name}")
-                            evaluation_queue.task_done()
-                            pbar_evaluation.update(1)
-                            continue
-                        
-                        doc = task_docs[task_name][doc_id]
-                        
-                        # 累积同doc_id的instances
-                        pending_docs[task_name][doc_id].append(instance)
-                        
-                        expected_count = task_output._streaming_expected_instances[doc_id]
-                        current_count = len(pending_docs[task_name][doc_id])
-                        
-                        # 如果该doc的所有实例都到齐了，提交评估任务
-                        if current_count == expected_count:
-                            doc_instances = pending_docs[task_name].pop(doc_id)
+                        # 遍历每个filter
+                        for filter_key in doc_instances[0].filtered_resps.keys():
+                            # 准备过滤后的结果
+                            filtered_results = [inst.filtered_resps[filter_key] for inst in doc_instances]
                             
-                            future = pool.submit(
-                                evaluate_doc,
-                                task_name,
-                                doc_id,
-                                doc_instances,
-                                doc
-                            )
-                            futures[future] = (task_name, doc_id, len(doc_instances))
+                            try:
+                                metrics = task.process_results(doc, filtered_results)
+                                
+                                # 立即存储指标
+                                for metric, value in metrics.items():
+                                    task_output.sample_metrics[(metric, filter_key)].append(value)
+                                
+                                if log_samples:
+                                    target = task.doc_to_target(doc)
+                                    saved_doc = {}
+                                    for key, value in doc.items():
+                                        if "image" not in key:
+                                            if isinstance(value, dict) and "array" in value:
+                                                continue
+                                            else:
+                                                saved_doc[key] = value
+                                    
+                                    filtered_arguments = []
+                                    for inst in doc_instances:
+                                        for value in inst.args:
+                                            if isinstance(value, (str, int, float, bool, list, dict, type(None))):
+                                                filtered_arguments.append(value)
+                                    
+                                    example = {
+                                        "doc_id": doc_id,
+                                        "doc": saved_doc,
+                                        "target": target,
+                                        "arguments": filtered_arguments,
+                                        "resps": [inst.resps for inst in doc_instances],
+                                        "filtered_resps": [inst.filtered_resps[filter_key] for inst in doc_instances],
+                                        "doc_hash": hash_string(
+                                            json.dumps(
+                                                doc_instances[0].doc,
+                                                indent=2,
+                                                default=handle_non_serializable,
+                                                ensure_ascii=False,
+                                            )
+                                        ),
+                                    }
+                                    example.update(metrics)
+                                    task_output.logged_samples.append(example)
+                                
+                                eval_logger.debug(
+                                    f"[Rank {RANK}] Task {task_name}, doc_id {doc_id}: {metrics}"
+                                )
+                                
+                            except Exception as e:
+                                eval_logger.error(
+                                    f"[Rank {RANK}] Error processing doc_id {doc_id} for task {task_name}: {e}"
+                                )
                         
-                    except Exception as e:
-                        eval_logger.error(f"[Rank {RANK}] Error processing instance: {e}")
-                    
-                    finally:
-                        evaluation_queue.task_done()
+                        # 清理已处理的 instances（释放内存）
+                        del task_output._streaming_instances_by_doc[doc_id]
                 
-                pbar_evaluation.close()
-                eval_logger.info(f"[Rank {RANK}] Evaluation thread completed")
-        
+                except Exception as e:
+                    eval_logger.error(f"[Rank {RANK}] Evaluation error for instance: {e}")
+                
+                finally:
+                    evaluation_queue.task_done()
+                    pbar_evaluation.update(1)
+            
+            pbar_evaluation.close()
+            eval_logger.info(f"[Rank {RANK}] Evaluation thread completed")
         
         # ========== 启动推理和评估线程（完全并行）==========
         eval_logger.info(f"[Rank {RANK}] Starting parallel inference and evaluation threads")
@@ -1165,6 +1177,8 @@ def evaluate_streaming(
     
     # ========== 清理临时数据结构 ==========
     for task_output in eval_tasks:
+        if hasattr(task_output, '_streaming_instances_by_doc'):
+            del task_output._streaming_instances_by_doc
         if hasattr(task_output, '_streaming_expected_instances'):
             del task_output._streaming_expected_instances
     

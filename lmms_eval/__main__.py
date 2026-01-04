@@ -283,6 +283,20 @@ def parse_eval_args() -> argparse.Namespace:
              "  full: Complete inference + evaluation (default)\n"
              "  eval_only: Evaluation only, using pre-existing results from dataset"
     )
+    # 新增流式评估参数
+    parser.add_argument(
+        "--streaming_eval",
+        action="store_true",
+        default=False,
+        help="Enable streaming evaluation (evaluate while inferring)\n"
+             "Inference and evaluation run in parallel for better efficiency"
+    )  
+    parser.add_argument(
+        "--eval_threads",
+        type=int,
+        default=4,
+        help="Number of threads for parallel evaluation in streaming mode"
+    )
     args = parser.parse_args()
     return args
 
@@ -522,6 +536,8 @@ def cli_evaluate_single(args: Union[argparse.Namespace, None] = None) -> None:
         force_simple=args.force_simple,
         launcher_args=args.launcher_args,
         eval_mode=args.eval_mode,
+        streaming_eval=args.streaming_eval,
+        eval_threads=args.eval_threads,
         **request_caching_args,
     )
 
