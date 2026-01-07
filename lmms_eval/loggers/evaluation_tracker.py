@@ -270,7 +270,7 @@ class EvaluationTracker:
                         sample.pop("resps")
                     sample["target"] = str(sample["target"])
                     sample.pop("arguments")
-                    sample.pop("doc")
+                    # sample.pop("doc")
 
                     sample_dump = (
                         json.dumps(

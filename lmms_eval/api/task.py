@@ -1433,8 +1433,8 @@ class ConfigurableTask(Task):
         if isinstance(doc_to_answer, int):
             return str(doc_to_answer)
         elif isinstance(doc_to_answer, str):
-            assert self.config.doc_to_answer in self.features
-            return [doc[self.config.doc_to_answer]]
+            assert doc_to_answer in self.features
+            return doc[doc_to_answer]
         elif callable(doc_to_answer):
             # Custom function support
             return (
