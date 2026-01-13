@@ -34,7 +34,7 @@ from lmms_eval.evaluator_utils import (
 from lmms_eval.llm_judge.launcher import get_launcher
 from lmms_eval.loggers.evaluation_tracker import EvaluationTracker
 from lmms_eval.models import get_model
-from lmms_eval.tasks import TaskManager, get_task_dict, Task
+from lmms_eval.tasks import Task, TaskManager, get_task_dict
 from lmms_eval.utils import (
     create_iterator,
     get_datetime_str,
@@ -86,7 +86,7 @@ def simple_evaluate(
     eval_mode: str = "full",
     streaming_eval: bool = False,
     eval_threads: int = 4,
-    **kwargs
+    **kwargs,
 ):
     """Instantiate and evaluate a model on a list of tasks.
 
@@ -174,12 +174,11 @@ def simple_evaluate(
         eval_logger.info("In EVAL_ONLY mode, only metrics are calculated; you must provide the model outputs yourself")
         eval_logger.info("Make sure your task YAML includes 'doc_to_answer' configuration")
         eval_logger.info("=" * 50)
-        
+
         # 覆盖模型参数
         model = "virtual_model"
         if model_args is None:
             model_args = ""
-        
 
     if gen_kwargs:
         gen_kwargs = simple_parse_args_string(gen_kwargs)
@@ -289,7 +288,7 @@ def simple_evaluate(
         eval_logger.info(f"Evaluation threads: {eval_threads}")
         eval_logger.info(f"Running on rank {global_rank} (world_size {world_size})")
         eval_logger.info("=" * 50)
-        
+
         results = evaluate_streaming(
             lm=lm,
             task_dict=task_dict,
@@ -536,9 +535,9 @@ def evaluate(
             numpad = max(gathered_item) - gathered_item[lm.rank]
             # todo: may not account for padding in cases like SquadV2 which has multiple req types
             padding_requests[reqtype] += numpad
-    
+
     # 如果是 VirtualModel，传递任务实例
-    if eval_mode == "eval_only" and hasattr(lm, 'set_parent_tasks') and callable(lm.set_parent_tasks):
+    if eval_mode == "eval_only" and hasattr(lm, "set_parent_tasks") and callable(lm.set_parent_tasks):
         lm.set_parent_tasks(task_dict)
 
     ### Run LMM on inputs, get all outputs ###
@@ -763,7 +762,6 @@ def evaluate(
 
     return results_dict
 
-
 @positional_deprecated
 def evaluate_streaming(
     lm: "LM",
@@ -810,7 +808,7 @@ def evaluate_streaming(
         batch_size = 1
 
     eval_logger.info(f"[Rank {RANK}] Starting streaming evaluation with parallel inference and evaluation")
-    
+
     # 存储结果的数据结构
     results = collections.defaultdict(dict)
     versions = collections.defaultdict(dict)
@@ -818,7 +816,7 @@ def evaluate_streaming(
     samples = collections.defaultdict(list)
     padding_requests = collections.defaultdict(int)
     num_fewshot = collections.defaultdict(int)
-    
+
     # 任务初始化
     eval_tasks = get_task_list(task_dict)
 
@@ -964,7 +962,7 @@ def evaluate_streaming(
                 
             except Exception as e:
                 eval_logger.error(f"[Rank {RANK}] Inference thread error: {e}")
-        
+
         # ========== 评估线程：使用线程池并发评估 ==========
         def evaluation_worker():
             """评估线程：使用线程池并发计算指标"""
@@ -1063,9 +1061,9 @@ def evaluate_streaming(
                         
                     except Exception as e:
                         eval_logger.error(f"[Rank {RANK}] Error processing doc_id {doc_id} for task {task_name}: {e}")
+                    
+                pbar_evaluation.update(len(doc_instances))
                 
-                pbar_evaluation.update(1)
-            
 
             # 使用线程池处理评估任务
             with ThreadPoolExecutor(max_workers=eval_threads) as pool:
@@ -1126,9 +1124,17 @@ def evaluate_streaming(
                     finally:
                         evaluation_queue.task_done()
                 
-                pbar_evaluation.close()
-                eval_logger.info(f"[Rank {RANK}] Evaluation thread completed")
-        
+                for future in as_completed(futures):
+                    task_name, doc_id, num_instances = futures[future]
+                    try:
+                        future.result()  # 确保任务执行完毕
+                        eval_logger.debug(f"[Rank {RANK}] Completed evaluation for task={task_name}, doc_id={doc_id}")
+                    except Exception as e:
+                        eval_logger.error(f"[Rank {RANK}] Error in evaluation task {task_name}/{doc_id}: {e}")
+
+                
+            pbar_evaluation.close()
+            eval_logger.info(f"[Rank {RANK}] Evaluation thread completed")
         
         # ========== 启动推理和评估线程（完全并行）==========
         eval_logger.info(f"[Rank {RANK}] Starting parallel inference and evaluation threads")
@@ -1286,6 +1292,7 @@ def evaluate_streaming(
             dist.barrier()
     
     return results_dict
+
 
 def request_caching_arg_to_dict(cache_requests: str) -> dict:
     request_caching_args = {
