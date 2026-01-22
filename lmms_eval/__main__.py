@@ -297,6 +297,17 @@ def parse_eval_args() -> argparse.Namespace:
         default=4,
         help="Number of threads for parallel evaluation in streaming mode"
     )
+    parser.add_argument(
+        "--enable_checkpointing",
+        action="store_true",
+        help="Enable checkpoint-based resume for inference and evaluation (single parameter control)",
+    )
+    parser.add_argument(
+        "--checkpoint_interval",
+        type=int,
+        default=50,
+        help="Save checkpoint every N samples (default: 50)",
+    )
     args = parser.parse_args()
     return args
 
@@ -538,6 +549,9 @@ def cli_evaluate_single(args: Union[argparse.Namespace, None] = None) -> None:
         eval_mode=args.eval_mode,
         streaming_eval=args.streaming_eval,
         eval_threads=args.eval_threads,
+        enable_checkpointing=args.enable_checkpointing,
+        checkpoint_interval=args.checkpoint_interval,
+        output_path=args.output_path,
         **request_caching_args,
     )
 

@@ -33,6 +33,7 @@ from lmms_eval.evaluator_utils import (
 )
 from lmms_eval.llm_judge.launcher import get_launcher
 from lmms_eval.loggers.evaluation_tracker import EvaluationTracker
+from lmms_eval.loggers.ckpt_logger import CheckpointLogger
 from lmms_eval.models import get_model
 from lmms_eval.tasks import Task, TaskManager, get_task_dict
 from lmms_eval.utils import (
@@ -68,6 +69,9 @@ def simple_evaluate(
     write_out: bool = False,
     log_samples: bool = True,
     evaluation_tracker: Optional[EvaluationTracker] = None,
+    enable_checkpointing: bool = False, # 是否启用检查点记录器
+    checkpoint_interval: int = 50, # checkpoint间隔
+    output_path: Optional[str] = None,
     system_instruction: Optional[str] = None,
     apply_chat_template: bool = False,
     fewshot_as_multiturn: bool = False,
@@ -144,6 +148,10 @@ def simple_evaluate(
         Random seed for fewshot sampler random generator. If set to None, the seed of generator will be set to None.
     :param distributed_executor_backend: str
         The backend to use for distributed execution, `accelerate` or `torchrun`. Defaults to "accelerate" for the `accelerate` library.
+    :param enable_checkpointing: bool
+        Enable checkpoint-based resume for both inference and evaluation (single parameter)
+    :param checkpoint_interval: int
+        Save checkpoint every N samples (default: 50)
     :return
         Dictionary of results
     """
@@ -167,6 +175,16 @@ def simple_evaluate(
     assert tasks != [], "No tasks specified, or no tasks found. Please verify the task names."
 
     assert distributed_executor_backend in {"accelerate", "torchrun"}, f"Invalid distributed executor backend: {distributed_executor_backend}. Choose either 'accelerate' or 'torchrun'."
+
+    # 初始化 checkpoint logger
+    checkpoint_logger = None
+    if enable_checkpointing and output_path:
+        checkpoint_logger = CheckpointLogger(
+            output_path=output_path,
+            model_name=model_args if isinstance(model_args, str) else model,
+            enable_checkpointing=True,
+            checkpoint_interval=checkpoint_interval,
+        )
 
     # 仅评估模式：强制使用虚拟模型
     if eval_mode == "eval_only":
@@ -308,6 +326,7 @@ def simple_evaluate(
             eval_server_launcher=None,
             eval_mode=eval_mode,
             eval_threads=eval_threads,
+            checkpoint_logger=checkpoint_logger,
         )
     else:
         results = evaluate(
@@ -782,6 +801,7 @@ def evaluate_streaming(
     eval_server_launcher: Optional[Union[str, Callable]] = None,
     eval_mode: str = "full",
     eval_threads: int = 4,
+    checkpoint_logger: Optional["CheckpointLogger"] = None,
 ):
     """
     真正的流式评估：推理和评估完全并行执行
@@ -848,7 +868,7 @@ def evaluate_streaming(
         else:
             n_shot = 0
         num_fewshot[task_name] = n_shot
-        
+
         # 构建请求
         limit_size = get_sample_size(task, limit)
         task.build_all_requests(
@@ -863,6 +883,37 @@ def evaluate_streaming(
             chat_template=getattr(lm, "apply_chat_template") if apply_chat_template else None,
             tokenizer_name=getattr(lm, "tokenizer_name", "") if apply_chat_template else "",
         )
+
+        # 如果启用了 checkpoint，在 Instance 级别过滤已完成的文档
+        if checkpoint_logger and len(task._instances) > 0:
+            original_instances = task._instances
+            
+            # 获取所有文档ID
+            all_doc_ids = sorted(set(inst.doc_id for inst in original_instances))
+            all_doc_ids_str = [str(doc_id) for doc_id in all_doc_ids]
+            
+            # 获取需要处理的文档ID
+            remaining_doc_ids_str = checkpoint_logger.get_remaining_docs(task_name, all_doc_ids_str)
+            remaining_doc_ids_set = set(int(doc_id) for doc_id in remaining_doc_ids_str)
+            
+            # 过滤实例：只保留需要处理的文档的实例
+            filtered_instances = [
+                inst for inst in original_instances 
+                if inst.doc_id in remaining_doc_ids_set
+            ]
+            
+            # 只有在有文档被跳过时才输出日志和替换实例
+            if len(filtered_instances) < len(original_instances):
+                completed_docs = len(all_doc_ids) - len(remaining_doc_ids_set)
+                eval_logger.info(
+                    f"[Rank {RANK}] [{task_name}] Resuming from checkpoint: "
+                    f"Skipping {completed_docs}/{len(all_doc_ids)} completed documents, "
+                    f"processing {len(filtered_instances)}/{len(original_instances)} instances"
+                )
+                
+                # 替换任务的实例列表
+                task._instances = filtered_instances
+
         eval_logger.info(f"[Rank {RANK}] Task {task_name}: {len(task._instances)} instances")
     
     # 按请求类型聚合所有任务的实例
@@ -961,7 +1012,7 @@ def evaluate_streaming(
                 eval_logger.info(f"[Rank {RANK}] Inference thread completed")
                 
             except Exception as e:
-                eval_logger.error(f"[Rank {RANK}] Inference thread error: {e}")
+                eval_logger.error(f"[Rank {RANK}] Inference thread error: {e}")                
 
         # ========== 评估线程：使用线程池并发评估 ==========
         def evaluation_worker():
@@ -1058,6 +1109,9 @@ def evaluate_streaming(
                             }
                             example.update(metrics)
                             task_output.logged_samples.append(example)
+
+                            if checkpoint_logger:
+                                checkpoint_logger.log_sample(task_name, example)
                         
                     except Exception as e:
                         eval_logger.error(f"[Rank {RANK}] Error processing doc_id {doc_id} for task {task_name}: {e}")
@@ -1132,8 +1186,12 @@ def evaluate_streaming(
                     except Exception as e:
                         eval_logger.error(f"[Rank {RANK}] Error in evaluation task {task_name}/{doc_id}: {e}")
 
-                
             pbar_evaluation.close()
+            # 确保所有buffer都已刷新
+            if checkpoint_logger:
+                eval_logger.debug(f"[Rank {RANK}] Flushing checkpoints in evaluation thread")
+                for task_name in task_name_to_output.keys():
+                    checkpoint_logger.flush(task_name)
             eval_logger.info(f"[Rank {RANK}] Evaluation thread completed")
         
         # ========== 启动推理和评估线程（完全并行）==========
@@ -1149,8 +1207,14 @@ def evaluate_streaming(
         # 等待两个线程完成
         inference_thread.join()
         evaluation_thread.join()
+
+        # 刷新所有任务的checkpoint
+        if checkpoint_logger:
+            eval_logger.info(f"[Rank {RANK}] Flushing checkpoints for all tasks")
+            for task_name in task_name_to_output.keys():
+                checkpoint_logger.flush(task_name)
         
-        # 同步点：确保所有 rank 完成
+        # 同步点：确保所有rank完成
         if world_size > 1:
             if distributed_executor_backend == "accelerate":
                 lm.accelerator.wait_for_everyone()
@@ -1207,6 +1271,13 @@ def evaluate_streaming(
                     task_output.sample_metrics[metrics] = list(itertools.chain.from_iterable(metric_list))
         
         dist.barrier()
+    
+    # 合并分布式checkpoint（仅rank 0）
+    if RANK == 0 and checkpoint_logger and WORLD_SIZE > 1:
+        eval_logger.info("Merging distributed checkpoints")
+        for task_output in eval_tasks:
+            checkpoint_logger.merge_distributed_checkpoints(task_output.task_name)
+
     
     # ========== 计算聚合指标（仅 Rank 0）==========
     if RANK == 0:

@@ -268,7 +268,7 @@ class EvaluationTracker:
                     sample["filtered_resps"] = sanitize_list(sample["filtered_resps"])
                     if sample["filtered_resps"] == sample["resps"][0] or sample["filtered_resps"] == sample["resps"]:
                         sample.pop("resps")
-                    sample["target"] = str(sample["target"])
+                    # sample["target"] = str(sample["target"])
                     sample.pop("arguments")
                     # sample.pop("doc")
 
