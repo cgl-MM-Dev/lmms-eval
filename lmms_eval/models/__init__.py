@@ -98,8 +98,8 @@ AVAILABLE_CHAT_TEMPLATE_MODELS = {
     "async_openai": "AsyncOpenAIChat",
     "longvila": "LongVila",
     "llava_onevision1_5": "Llava_OneVision1_5",
+    "url_model" : "URLModel",
 }
-
 
 def get_model(model_name, force_simple: bool = False):
     if model_name not in AVAILABLE_SIMPLE_MODELS and model_name not in AVAILABLE_CHAT_TEMPLATE_MODELS:
