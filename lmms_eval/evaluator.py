@@ -845,6 +845,8 @@ def evaluate_streaming(
     
     # 构建任务映射：task_name -> task_output
     task_name_to_output = {}
+    # 按请求类型聚合所有任务的实例
+    requests = collections.defaultdict(list)
     for task_output in eval_tasks:
         task: Task = task_output.task
         task_name = task_output.task_name
@@ -883,7 +885,7 @@ def evaluate_streaming(
             chat_template=getattr(lm, "apply_chat_template") if apply_chat_template else None,
             tokenizer_name=getattr(lm, "tokenizer_name", "") if apply_chat_template else "",
         )
-
+    
         # 如果启用了 checkpoint，在 Instance 级别过滤已完成的文档
         if checkpoint_logger and len(task._instances) > 0:
             original_instances = task._instances
@@ -896,33 +898,38 @@ def evaluate_streaming(
             remaining_doc_ids_str = checkpoint_logger.get_remaining_docs(task_name, all_doc_ids_str)
             remaining_doc_ids_set = set(int(doc_id) for doc_id in remaining_doc_ids_str)
             
-            # 过滤实例：只保留需要处理的文档的实例
-            filtered_instances = [
-                inst for inst in original_instances 
-                if inst.doc_id in remaining_doc_ids_set
-            ]
-            
-            # 只有在有文档被跳过时才输出日志和替换实例
-            if len(filtered_instances) < len(original_instances):
+            if remaining_doc_ids_set != None:
+                # 从断点处加载数据时才输出日志
                 completed_docs = len(all_doc_ids) - len(remaining_doc_ids_set)
-                eval_logger.info(
-                    f"[Rank {RANK}] [{task_name}] Resuming from checkpoint: "
-                    f"Skipping {completed_docs}/{len(all_doc_ids)} completed documents, "
-                    f"processing {len(filtered_instances)}/{len(original_instances)} instances"
-                )
-                
-                # 替换任务的实例列表
-                task._instances = filtered_instances
+                if completed_docs > 0:
+                    eval_logger.info(
+                        f"[Rank {RANK}] [{task_name}] Resuming from checkpoint: "
+                        f"Skipping {completed_docs}/{len(all_doc_ids)} completed documents, "
+                        f"processing {len(remaining_doc_ids_set)}/{len(original_instances)} instances"
+                    )
+                    
+                    # 加载历史指标和样本
+                    historical_metrics, historical_samples = checkpoint_logger.load_historical_metrics(task_name)
+                    # 将历史指标加载到 task_output.sample_metrics
+                    if historical_metrics:   
+                        for metric_key, values in historical_metrics.items():
+                            task_output.sample_metrics[metric_key].extend(values)
+                    # 将历史样本加载到 task_output.logged_samples
+                    if historical_samples and log_samples:      
+                        task_output.logged_samples.extend(historical_samples)
 
-        eval_logger.info(f"[Rank {RANK}] Task {task_name}: {len(task._instances)} instances")
-    
-    # 按请求类型聚合所有任务的实例
-    requests = collections.defaultdict(list)
-    for task_output in eval_tasks:
-        task = task_output.task
-        for instance in task.instances:
-            reqtype = instance.request_type
-            requests[reqtype].append(instance)
+                # 过滤实例：只保留需要处理的文档的实例
+                filtered_instances = [
+                    inst for inst in original_instances 
+                    if inst.doc_id in remaining_doc_ids_set
+                ]
+                    
+                # 加载未处理过的请求任务列表
+                for instance in filtered_instances:
+                    reqtype = instance.request_type
+                    requests[reqtype].append(instance)
+
+        eval_logger.info(f"[Rank {RANK}] Task {task_name}: {len(filtered_instances)} instances")
     
     # 计算padding（确保多卡同步）
     if world_size > 1:
@@ -1012,7 +1019,7 @@ def evaluate_streaming(
                 eval_logger.info(f"[Rank {RANK}] Inference thread completed")
                 
             except Exception as e:
-                eval_logger.error(f"[Rank {RANK}] Inference thread error: {e}")                
+                eval_logger.error(f"[Rank {RANK}] Inference thread error: {e}")
 
         # ========== 评估线程：使用线程池并发评估 ==========
         def evaluation_worker():
@@ -1111,7 +1118,7 @@ def evaluate_streaming(
                             task_output.logged_samples.append(example)
 
                             if checkpoint_logger:
-                                checkpoint_logger.log_sample(task_name, example)
+                                checkpoint_logger.log_sample(task_name, example, filter_key)
                         
                     except Exception as e:
                         eval_logger.error(f"[Rank {RANK}] Error processing doc_id {doc_id} for task {task_name}: {e}")
@@ -1132,8 +1139,13 @@ def evaluate_streaming(
                         break
                     
                     try:
-                        task_name = instance.task_name
+                        # 检查响应有效性
+                        if instance.resps[0] is None or "error" in instance.resps[0].lower() or instance.resps[0] == "":
+                            eval_logger.warning(f"Skipping invalid response for doc_id={doc_id}")
+                            evaluation_queue.task_done()
+                            continue
                         
+                        task_name = instance.task_name
                         if task_name not in task_name_to_output:
                             eval_logger.warning(f"[Rank {RANK}] Unknown task: {task_name}, skipping")
                             evaluation_queue.task_done()

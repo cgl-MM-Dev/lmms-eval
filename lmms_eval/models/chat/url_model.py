@@ -72,7 +72,7 @@ class URLModel(lmms):
         self.disable_log_stats = disable_log_stats
         if not self.base_url:
             raise ValueError("base_url must be provided")
-        self.client = OpenAI(base_url=self.base_url, api_key=self.api_key)          
+        self.client = OpenAI(base_url=self.base_url, api_key=self.api_key, timeout=self.timeout, max_retries=0)          
             
         # Initialize accelerator for distributed settings
         accelerator = Accelerator()
@@ -98,16 +98,29 @@ class URLModel(lmms):
             video_kwargs["nframes"] = self.nframes
         
         messages = chat_messages.to_openai_messages(video_kwargs=video_kwargs)
-        response = self.client.chat.completions.create(
-            messages=messages,
-            model=self.model_name,
-            temperature=gen_kwargs.get("temperature", 0),
-            top_p=gen_kwargs.get("top_p", 0.95),
-            max_tokens=gen_kwargs.get("max_new_tokens", 4096),
-        )
-        response = response.choices[0].message.content.strip()
+    
+        for attempt in range(self.max_retries):
+            try:
+                response = self.client.chat.completions.create(
+                    messages=messages,
+                    model=self.model_name,
+                    temperature=gen_kwargs.get("temperature", 0),
+                    top_p=gen_kwargs.get("top_p", 0.95),
+                    max_tokens=gen_kwargs.get("max_new_tokens", 4096),
+                )
+                response = response.choices[0].message.content.strip()
 
-        return response
+                # 检查响应是否有效
+                if response is None or response.strip() == "" or "error" in response.strip().lower():
+                    raise ValueError("Invalid response received from URL model")
+
+                return response
+            except Exception as e:
+                eval_logger.warning(f"{doc_id}: Request failed (attempt {attempt + 1}/{self.max_retries}): {str(e)}")
+                time.sleep(2 ** attempt)  # Exponential backoff
+        
+        eval_logger.error(f"All attempts failed for {doc_id}")
+        return "[ERROR]"
     
     def generate_until(self, requests) -> List[str]:
         """
