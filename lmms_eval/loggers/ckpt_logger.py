@@ -185,8 +185,7 @@ class CheckpointLogger:
                         
                         # 提取所有指标（排除元数据字段）
                         excluded_fields = {
-                            "doc_id", "doc", "target", "input", "resps", 
-                            "filtered_resps", "doc_hash", "arguments", "filter_key"
+                            "doc_id", "doc", "target", "resps", "filtered_resps", "doc_hash", "arguments", "filter_key"
                         }
                         
                         # 提取指标并使用正确的filter_key
@@ -315,22 +314,12 @@ class CheckpointLogger:
         """Clean sample data while preserving filter_key."""
         cleaned = sample.copy()
 
-        # Add input field if arguments exist
-        if "arguments" in cleaned and len(cleaned["arguments"]) > 0:
-            cleaned["input"] = cleaned["arguments"][0]
-
         # Sanitize resps and filtered_resps
         if "resps" in cleaned:
             cleaned["resps"] = sanitize_list(cleaned["resps"])
 
         if "filtered_resps" in cleaned:
             cleaned["filtered_resps"] = sanitize_list(cleaned["filtered_resps"])
-
-            # Remove duplicate resps if they match filtered_resps
-            if "resps" in cleaned:
-                if (cleaned["filtered_resps"] == cleaned["resps"][0] or 
-                    cleaned["filtered_resps"] == cleaned["resps"]):
-                    cleaned.pop("resps")
 
         return cleaned
 
