@@ -1123,8 +1123,6 @@ def evaluate_streaming(
                     except Exception as e:
                         eval_logger.error(f"[Rank {RANK}] Error processing doc_id {doc_id} for task {task_name}: {e}")
                     
-                pbar_evaluation.update(len(doc_instances))
-                
 
             # 使用线程池处理评估任务
             with ThreadPoolExecutor(max_workers=eval_threads) as pool:
@@ -1143,6 +1141,7 @@ def evaluate_streaming(
                         if instance.resps[0] is None or "error" in instance.resps[0].lower() or instance.resps[0] == "":
                             eval_logger.warning(f"Skipping invalid response for doc_id={doc_id}")
                             evaluation_queue.task_done()
+                            pbar_evaluation.update(1)
                             continue
                         
                         task_name = instance.task_name
@@ -1183,12 +1182,13 @@ def evaluate_streaming(
                                 doc
                             )
                             futures[future] = (task_name, doc_id, len(doc_instances))
+                        evaluation_queue.task_done()
+                        pbar_evaluation.update(len(doc_instances))
                         
                     except Exception as e:
                         eval_logger.error(f"[Rank {RANK}] Error processing instance: {e}")
-                    
-                    finally:
                         evaluation_queue.task_done()
+                        pbar_evaluation.update(len(doc_instances))
                 
                 for future in as_completed(futures):
                     task_name, doc_id, num_instances = futures[future]
