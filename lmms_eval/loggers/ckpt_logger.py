@@ -321,6 +321,20 @@ class CheckpointLogger:
         if "filtered_resps" in cleaned:
             cleaned["filtered_resps"] = sanitize_list(cleaned["filtered_resps"])
 
+        if "doc" in cleaned and isinstance(cleaned["doc"], dict):
+            doc = cleaned["doc"].copy()
+            # 如果 doc 中有 metadata 字段
+            if "metadata" in doc:
+                metadata = doc.pop("metadata")  # 从 doc 中移除
+                if metadata and isinstance(metadata, dict):
+                    cleaned_metadata = {
+                        k: v for k, v in metadata.items() 
+                        if v is not None
+                    }
+                    if cleaned_metadata:
+                        doc["metadata"] = cleaned_metadata
+            cleaned["doc"] = doc
+
         return cleaned
 
     def flush(self, task_name: Optional[str] = None):

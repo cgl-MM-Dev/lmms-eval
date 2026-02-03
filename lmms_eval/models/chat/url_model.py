@@ -79,7 +79,7 @@ class URLModel(lmms):
         self._rank = accelerator.process_index
         self._world_size = accelerator.num_processes
  
-    def generate_request(self, request: Instance) -> Tuple[list[dict], dict]:
+    def _generate_request(self, request: Instance) -> Tuple[list[dict], dict]:
         """
         Generate a single request to the URL model.
         """
@@ -110,10 +110,6 @@ class URLModel(lmms):
                 )
                 response = response.choices[0].message.content.strip()
 
-                # 检查响应是否有效
-                if response is None or response.strip() == "" or "error" in response.strip().lower():
-                    raise ValueError("Invalid response received from URL model")
-
                 return response
             except Exception as e:
                 eval_logger.warning(f"{doc_id}: Request failed (attempt {attempt + 1}/{self.max_retries}): {str(e)}")
@@ -122,41 +118,11 @@ class URLModel(lmms):
         eval_logger.error(f"All attempts failed for {doc_id}")
         return "[ERROR]"
     
-    def generate_until(self, requests) -> List[str]:
+    def generate_until(self, request) -> str:
         """
-        Generate responses for a batch of requests.
-        
-        Args:
-            requests: List of Instance objects
-            
-        Returns:
-            List of generated responses
+        Generate response for a single request.
         """
-        result = []
-        
-        pbar = tqdm(total=len(requests), disable=(self.rank != 0), desc="Model Responding")
-
-        # 使用线程池并行处理请求
-        with ThreadPoolExecutor(max_workers=WORKERS) as executor:
-            # 提交所有任务
-            future_to_idx = {executor.submit(self.generate_request, request): idx for idx, request in enumerate(requests)}
-            
-            # 按提交顺序收集结果
-            results_dict = {}
-            for future in as_completed(future_to_idx):
-                idx = future_to_idx[future]
-                try:
-                    response = future.result()
-                    results_dict[idx] = response
-                except Exception as e:
-                    eval_logger.error(f"Error processing request {idx}: {str(e)}")
-                    results_dict[idx] = "[ERROR: Processing failed]"
-                pbar.update(1)
-        
-        # 按原始顺序排列结果
-        result = [results_dict[i] for i in range(len(requests))]
-        pbar.close()
-        return result
+        return self._generate_request(request)
 
     def loglikelihood(self, requests: List[Instance]) -> List[Tuple[float, bool]]:
         """Not implemented for URL model."""

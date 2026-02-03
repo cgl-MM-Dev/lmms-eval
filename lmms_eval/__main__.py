@@ -290,11 +290,17 @@ def parse_eval_args() -> argparse.Namespace:
         default=False,
         help="Enable streaming evaluation (evaluate while inferring)\n"
              "Inference and evaluation run in parallel for better efficiency"
-    )  
+    )
+    parser.add_argument(
+        "--inference_threads",
+        type=int,
+        default=1,
+        help="Number of threads for parallel evaluation in streaming mode"
+    )
     parser.add_argument(
         "--eval_threads",
         type=int,
-        default=4,
+        default=2,
         help="Number of threads for parallel evaluation in streaming mode"
     )
     parser.add_argument(
@@ -548,6 +554,7 @@ def cli_evaluate_single(args: Union[argparse.Namespace, None] = None) -> None:
         launcher_args=args.launcher_args,
         eval_mode=args.eval_mode,
         streaming_eval=args.streaming_eval,
+        inference_threads=args.inference_threads,
         eval_threads=args.eval_threads,
         enable_checkpointing=args.enable_checkpointing,
         checkpoint_interval=args.checkpoint_interval,

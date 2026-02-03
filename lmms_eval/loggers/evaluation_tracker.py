@@ -270,7 +270,20 @@ class EvaluationTracker:
                         sample.pop("resps")
                     # sample["target"] = str(sample["target"])
                     sample.pop("arguments")
-                    # sample.pop("doc")
+                    # 从 doc 中提取并清理metadata
+                    if "doc" in sample and isinstance(sample["doc"], dict):
+                        doc = sample["doc"].copy()
+                        if "metadata" in doc:
+                            metadata = doc.pop("metadata")
+                            # 只保存非空的 metadata
+                            if metadata and isinstance(metadata, dict):
+                                cleaned_metadata = {
+                                    k: v for k, v in metadata.items() 
+                                    if v is not None
+                                }
+                                if cleaned_metadata:
+                                    doc["metadata"] = cleaned_metadata
+                        sample["doc"] = doc
 
                     sample_dump = (
                         json.dumps(

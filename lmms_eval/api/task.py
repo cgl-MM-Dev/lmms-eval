@@ -9,6 +9,8 @@ import random
 import re
 import shutil
 import subprocess
+import tempfile
+from pathlib import Path
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from functools import partial
@@ -871,6 +873,86 @@ class ConfigurableTask(Task):
                     eval_logger.warning(f"[Task: {self._config.task}] metric {metric_name} is defined, but higher_is_better is not. " f"using default " f"higher_is_better={is_higher_better(metric_name)}")
                     self._higher_is_better[metric_name] = is_higher_better(metric_name)
 
+        def _standardize_jsonl_metadata(self, jsonl_path: str) -> str:
+            """
+            Standardize metadata fields in JSONL file before loading.
+            
+            Args:
+                jsonl_path: Path to the JSONL file
+                
+            Returns:
+                Path to the standardized JSONL file (temporary file)
+            """
+            jsonl_path = Path(jsonl_path)
+            
+            if not jsonl_path.exists():
+                eval_logger.warning(f"JSONL file not found: {jsonl_path}")
+                return str(jsonl_path)
+            
+            eval_logger.info(f"Standardizing metadata in {jsonl_path}...")
+            
+            # Step 1: Collect all metadata keys from the entire file
+            all_metadata_keys = set()
+            lines = []
+            
+            with open(jsonl_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                        
+                    try:
+                        data = json.loads(line)
+                        lines.append(data)
+                        
+                        # Collect metadata keys
+                        if 'metadata' in data and isinstance(data['metadata'], dict):
+                            all_metadata_keys.update(data['metadata'].keys())
+                    except json.JSONDecodeError as e:
+                        eval_logger.warning(f"Error: {e}")
+                        continue
+            
+            if not lines:
+                eval_logger.warning(f"No valid lines found in {jsonl_path}")
+                return str(jsonl_path)
+            
+            # Step 2: Create temporary file with standardized data
+            # Use a temporary file in the same directory to ensure same filesystem
+            temp_file = tempfile.NamedTemporaryFile(
+                mode='w',
+                encoding='utf-8',
+                suffix='.jsonl',
+                dir=jsonl_path.parent,
+                delete=False
+            )
+            
+            try:
+                standardized_count = 0
+                for data in lines:
+                    # Standardize metadata field
+                    if 'metadata' not in data or data['metadata'] is None:
+                        data['metadata'] = {key: None for key in all_metadata_keys}
+                    else:
+                        metadata = data['metadata']
+                        for key in all_metadata_keys:
+                            if key not in metadata:
+                                metadata[key] = None
+                        data['metadata'] = metadata
+                    # Write standardized line
+                    temp_file.write(json.dumps(data, ensure_ascii=False) + '\n')
+                    standardized_count += 1
+                
+                temp_file.close()
+                
+                return temp_file.name
+                
+            except Exception as e:
+                temp_file.close()
+                if Path(temp_file.name).exists():
+                    Path(temp_file.name).unlink()
+                eval_logger.error(f"Failed to standardize JSONL: {e}")
+                return str(jsonl_path)
+        
     @retry(stop=(stop_after_attempt(5) | stop_after_delay(60)), wait=wait_fixed(2))
     def download(self, dataset_kwargs=None) -> None:
         # If the dataset is a video dataset,
@@ -1055,13 +1137,28 @@ class ConfigurableTask(Task):
             # `ds = load_datasets("lmms-lab/MMMU")`
             self.dataset = datasets.load_from_disk(dataset_path=self.DATASET_PATH)
         else:
+            # Check if loading from local JSONL file
+            standardized_path = None
+            if self.DATASET_PATH and os.path.exists(self.DATASET_PATH):
+                if self.DATASET_PATH.endswith('.jsonl'):
+                    # Standardize the JSONL file
+                    standardized_path = self._standardize_jsonl_metadata(self.DATASET_PATH)
+                    load_path = standardized_path
+                else:
+                    load_path = self.DATASET_PATH
+            else:
+                load_path = self.DATASET_PATH
+
             self.dataset = datasets.load_dataset(
-                path=self.DATASET_PATH,
+                path=load_path,
                 name=self.DATASET_NAME,
                 download_mode=datasets.DownloadMode.REUSE_DATASET_IF_EXISTS,
                 download_config=download_config,
                 **dataset_kwargs if dataset_kwargs is not None else {},
             )
+
+            if standardized_path is not None and standardized_path != self.DATASET_PATH:
+                Path(standardized_path).unlink()
 
         if self.config.process_docs is not None:
             for split in self.dataset:

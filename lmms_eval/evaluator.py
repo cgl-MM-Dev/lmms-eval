@@ -89,7 +89,8 @@ def simple_evaluate(
     force_simple: bool = False,
     eval_mode: str = "full",
     streaming_eval: bool = False,
-    eval_threads: int = 4,
+    inference_threads: int = 1,
+    eval_threads: int = 2,
     **kwargs,
 ):
     """Instantiate and evaluate a model on a list of tasks.
@@ -303,7 +304,6 @@ def simple_evaluate(
     if streaming_eval:
         eval_logger.info("=" * 50)
         eval_logger.info("Streaming evaluation enabled: inference and evaluation run in parallel")
-        eval_logger.info(f"Evaluation threads: {eval_threads}")
         eval_logger.info(f"Running on rank {global_rank} (world_size {world_size})")
         eval_logger.info("=" * 50)
 
@@ -325,6 +325,7 @@ def simple_evaluate(
             cli_args=cli_args,
             eval_server_launcher=None,
             eval_mode=eval_mode,
+            inference_threads=inference_threads,
             eval_threads=eval_threads,
             checkpoint_logger=checkpoint_logger,
         )
@@ -800,6 +801,7 @@ def evaluate_streaming(
     cli_args=None,
     eval_server_launcher: Optional[Union[str, Callable]] = None,
     eval_mode: str = "full",
+    inference_threads: int = 1,
     eval_threads: int = 4,
     checkpoint_logger: Optional["CheckpointLogger"] = None,
 ):
@@ -972,54 +974,112 @@ def evaluate_streaming(
 
         # ========== 推理线程：批量推理，结果放入队列 ==========
         def inference_worker():
-            """推理线程：不断推理，将结果放入队列"""         
-            try:
-                eval_logger.info(f"[Rank {RANK}] Inference thread started")
-                
-                # 创建进度条
-                pbar_inference = tqdm(
-                    total=total_requests,
-                    desc=f"[Rank {RANK}] Inference",
-                    disable=(RANK != 0),
-                    position=0
-                )
-
-                num_batches = (total_requests + batch_size - 1) // batch_size
-                for batch_idx in range(num_batches):
-                    # 获取当前批次
-                    start_idx = batch_idx * batch_size
-                    end_idx = min(start_idx + batch_size, total_requests)
-                    batch_reqs = cloned_reqs[start_idx:end_idx]
+            """推理线程：不断推理，将结果放入队列"""
+            if batch_size == 1:
+                # 使用线程池并发处理每个请求
+                try:
+                    eval_logger.info(f"[Rank {RANK}] Inference thread started with {inference_threads} workers")
                     
-                    eval_logger.debug(
-                        f"[Rank {RANK}] Processing batch {batch_idx + 1}/{num_batches} "
-                        f"({len(batch_reqs)} requests)"
+                    # 创建进度条
+                    pbar_inference = tqdm(
+                        total=total_requests,
+                        desc=f"[Rank {RANK}] Inference",
+                        disable=(RANK != 0),
+                        position=0
                     )
                     
-                    # 推理当前批次
-                    try:
-                        batch_resps = getattr(lm, reqtype)(batch_reqs)
-                        # 立即将每个结果放入队列
-                        for resp, instance in zip(batch_resps, batch_reqs):
-                            instance.resps.append(resp)
-                            evaluation_queue.put(instance)                     
-                    except Exception as e:
-                        eval_logger.error(
-                            f"[Rank {RANK}] Error in batch {batch_idx + 1}: {e}"
+                    def process_single_request(instance):
+                        """处理单个请求的函数"""
+                        try:
+                            # 将单个instance包装成列表传给模型
+                            response = getattr(lm, reqtype)(instance).strip()
+                            # 检查响应是否有效
+                            if response is None or response.strip() == "" or "error" in response.strip().lower():
+                                response = f"error: invalid response"
+                            instance.resps.append(response)
+                            return instance
+                        except Exception as e:
+                            eval_logger.error(f"[Rank {RANK}] Error processing request: {e}")
+                            instance.resps.append(f"error: {e}")
+                            return instance
+                    
+                    # 使用线程池并发处理所有请求
+                    with ThreadPoolExecutor(max_workers=inference_threads) as executor:
+                        # 提交所有任务
+                        future_to_instance = {
+                            executor.submit(process_single_request, instance): instance
+                            for instance in cloned_reqs
+                        }
+                        
+                        # 按完成顺序处理结果
+                        for future in as_completed(future_to_instance):
+                            try:
+                                processed_instance = future.result()
+                                evaluation_queue.put(processed_instance)
+                            except Exception as e:
+                                instance = future_to_instance[future]
+                                eval_logger.error(f"[Rank {RANK}] Request failed: {e}")
+                                instance.resps.append(f"error: {e}")
+                                evaluation_queue.put(instance)
+                            
+                            pbar_inference.update(1)
+                    
+                    pbar_inference.close()
+                    evaluation_queue.put(None)  # 结束信号
+                    eval_logger.info(f"[Rank {RANK}] Inference thread completed")
+                    
+                except Exception as e:
+                    eval_logger.error(f"[Rank {RANK}] Inference thread error: {e}")
+                    evaluation_queue.put(None)
+            else:
+                # 批量推理
+                try:
+                    eval_logger.info(f"[Rank {RANK}] Inference thread started")
+                    
+                    # 创建进度条
+                    pbar_inference = tqdm(
+                        total=total_requests,
+                        desc=f"[Rank {RANK}] Inference",
+                        disable=(RANK != 0),
+                        position=0
+                    )
+
+                    num_batches = (total_requests + batch_size - 1) // batch_size
+                    for batch_idx in range(num_batches):
+                        # 获取当前批次
+                        start_idx = batch_idx * batch_size
+                        end_idx = min(start_idx + batch_size, total_requests)
+                        batch_reqs = cloned_reqs[start_idx:end_idx]
+                        
+                        eval_logger.debug(
+                            f"[Rank {RANK}] Processing batch {batch_idx + 1}/{num_batches} "
+                            f"({len(batch_reqs)} requests)"
                         )
-                        # 即使出错，也要放入空结果，保持队列同步
-                        for instance in batch_reqs:
-                            instance.resps.append("")
-                            evaluation_queue.put(instance)
-                    # 更新进度条
-                    pbar_inference.update(len(batch_reqs))
-                
-                pbar_inference.close()
-                evaluation_queue.put(None)
-                eval_logger.info(f"[Rank {RANK}] Inference thread completed")
-                
-            except Exception as e:
-                eval_logger.error(f"[Rank {RANK}] Inference thread error: {e}")
+                        
+                        # 推理当前批次
+                        try:
+                            batch_resps = getattr(lm, reqtype)(batch_reqs)
+                            # 立即将每个结果放入队列
+                            for resp, instance in zip(batch_resps, batch_reqs):
+                                instance.resps.append(resp)
+                                evaluation_queue.put(instance)                     
+                        except Exception as e:
+                            eval_logger.error(
+                                f"[Rank {RANK}] Error in batch {batch_idx + 1}: {e}"
+                            )
+                            # 即使出错，也要放入空结果，保持队列同步
+                            for instance in batch_reqs:
+                                instance.resps.append("")
+                                evaluation_queue.put(instance)
+                        # 更新进度条
+                        pbar_inference.update(len(batch_reqs))
+                    
+                    pbar_inference.close()
+                    evaluation_queue.put(None)
+                    eval_logger.info(f"[Rank {RANK}] Inference thread completed")
+                    
+                except Exception as e:
+                    eval_logger.error(f"[Rank {RANK}] Inference thread error: {e}")
 
         # ========== 评估线程：使用线程池并发评估 ==========
         def evaluation_worker():
@@ -1122,7 +1182,7 @@ def evaluate_streaming(
                         
                     except Exception as e:
                         eval_logger.error(f"[Rank {RANK}] Error processing doc_id {doc_id} for task {task_name}: {e}")
-                    
+                
 
             # 使用线程池处理评估任务
             with ThreadPoolExecutor(max_workers=eval_threads) as pool:
