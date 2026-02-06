@@ -12,6 +12,7 @@ from lmms_eval.utils import (
     handle_non_serializable,
     sanitize_list,
     sanitize_model_name,
+    unflatten_dict
 )
 
 class CheckpointLogger:
@@ -325,14 +326,12 @@ class CheckpointLogger:
             doc = cleaned["doc"].copy()
             # 如果 doc 中有 metadata 字段
             if "metadata" in doc:
-                metadata = doc.pop("metadata")  # 从 doc 中移除
-                if metadata and isinstance(metadata, dict):
-                    cleaned_metadata = {
-                        k: v for k, v in metadata.items() 
-                        if v is not None
-                    }
-                    if cleaned_metadata:
-                        doc["metadata"] = cleaned_metadata
+                flat_metadata = doc.pop("metadata")
+                if flat_metadata and isinstance(flat_metadata, dict):
+                    # 使用反扁平化
+                    nested_metadata = unflatten_dict(flat_metadata)
+                    if nested_metadata:
+                        doc["metadata"] = nested_metadata
             cleaned["doc"] = doc
 
         return cleaned

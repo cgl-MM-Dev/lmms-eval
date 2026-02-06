@@ -92,6 +92,49 @@ def handle_arg_string(arg):
     except ValueError:
         return arg
 
+def unflatten_dict(flat_dict: dict, sep: str = '.') -> dict:
+    """
+    将扁平化的字典恢复为嵌套结构，自动过滤 None 值并清理空字典
+    
+    Args:
+        flat_dict: 扁平化的字典 {"a.b.c": 1, "a.b.d": 2}
+        sep: 分隔符
+        
+    Returns:
+        嵌套字典 {"a": {"b": {"c": 1, "d": 2}}}
+        
+    Examples:
+        >>> unflatten_dict({"log.score": 10, "log.is_match": True, "log.type": None})
+        {"log": {"score": 10, "is_match": True}}
+        
+        >>> unflatten_dict({"uid": "123", "source.score": 1, "source.type": "gt", "source.json_format": None})
+        {"uid": "123", "source": {"score": 1, "type": "gt"}}
+    """
+    if not flat_dict or not isinstance(flat_dict, dict):
+        return flat_dict
+    
+    # 1. 先过滤掉 None 值
+    filtered = {k: v for k, v in flat_dict.items() if v is not None}
+    
+    if not filtered:
+        return {}
+    
+    # 2. 构建嵌套结构
+    result = {}
+    
+    for flat_key, value in filtered.items():
+        keys = flat_key.split(sep)
+        
+        # 构建嵌套路径
+        current = result
+        for key in keys[:-1]:
+            if key not in current:
+                current[key] = {}
+            current = current[key]
+        
+        current[keys[-1]] = value
+    
+    return result
 
 def handle_non_serializable(o):
     if isinstance(o, np.int64) or isinstance(o, np.int32):

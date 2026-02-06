@@ -25,6 +25,7 @@ from lmms_eval.utils import (
     sanitize_list,
     sanitize_model_name,
     sanitize_task_name,
+    unflatten_dict,
 )
 
 
@@ -275,12 +276,8 @@ class EvaluationTracker:
                         doc = sample["doc"].copy()
                         if "metadata" in doc:
                             metadata = doc.pop("metadata")
-                            # 只保存非空的 metadata
                             if metadata and isinstance(metadata, dict):
-                                cleaned_metadata = {
-                                    k: v for k, v in metadata.items() 
-                                    if v is not None
-                                }
+                                cleaned_metadata = unflatten_dict(metadata)
                                 if cleaned_metadata:
                                     doc["metadata"] = cleaned_metadata
                         sample["doc"] = doc
