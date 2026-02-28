@@ -132,8 +132,8 @@ class CheckpointLogger:
                             sample = json.loads(line.strip())
                             doc_id = str(sample.get("doc_id"))
                             filter_key = sample.get("filter_key", "none")
-                            
-                            if doc_id:
+                            success = sample.get("success", True) # 只有成功的样本才算完成
+                            if doc_id and success:
                                 self.completed_samples[task_name].add((doc_id, filter_key))
                         except json.JSONDecodeError:
                             continue
@@ -169,6 +169,8 @@ class CheckpointLogger:
         historical_metrics = defaultdict(list)
         historical_samples = []
         seen_samples = set()  # Track (doc_id, filter_key) pairs
+        failed_count = 0
+        valid_lines: list[str] = []
         
         try:
             with open(sample_file, "r", encoding="utf-8") as f:
@@ -177,8 +179,18 @@ class CheckpointLogger:
                         sample = json.loads(line.strip())
                         doc_id = str(sample.get("doc_id"))
                         filter_key = sample.get("filter_key", "none")
+
+                        # 只加载成功的样本到历史数据
+                        success = sample.get("success", True) 
+                        if not success:
+                            eval_logger.info(
+                                f"[{task_name}] Skipping failed sample doc_id={doc_id} (success=False), will be retried"
+                            )
+                            failed_count += 1
+                            continue
                         
                         # 避免重复加载相同的 (doc_id, filter_key)
+                        valid_lines.append(line.strip())
                         sample_key = (doc_id, filter_key)
                         if sample_key in seen_samples:
                             continue
@@ -186,7 +198,8 @@ class CheckpointLogger:
                         
                         # 提取所有指标（排除元数据字段）
                         excluded_fields = {
-                            "doc_id", "doc", "target", "resps", "filtered_resps", "doc_hash", "arguments", "filter_key"
+                            "doc_id", "doc", "target", "resps", "filtered_resps",
+                            "doc_hash", "arguments", "filter_key", "success",
                         }
                         
                         # 提取指标并使用正确的filter_key
@@ -208,6 +221,13 @@ class CheckpointLogger:
                 f"{len(historical_metrics)} metric types, "
                 f"{sum(len(v) for v in historical_metrics.values())} data points"
             )
+
+            if failed_count > 0:
+                lock_file = sample_file.with_suffix(".lock")
+                with filelock.FileLock(str(lock_file), timeout=10):
+                    with open(sample_file, "w", encoding="utf-8") as f:
+                        for line in valid_lines:
+                            f.write(line + "\n")
             
             return dict(historical_metrics), historical_samples
             

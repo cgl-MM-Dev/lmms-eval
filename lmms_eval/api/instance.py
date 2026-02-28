@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Literal, Tuple
-
+from typing import Optional
 
 @dataclass
 class Instance:
@@ -10,12 +10,13 @@ class Instance:
     metadata: Tuple[str, int, int] = field(default_factory=lambda: (None, None, None))  # TODO: better typehints here
     resps: list = field(default_factory=list)
     filtered_resps: dict = field(default_factory=dict)
-
+    
     # initialized after init
     task_name: str = None
     doc_id: str = None
     repeats: str = None
     doc: dict = None
+    success: Optional[bool] = None
 
     def __post_init__(self) -> None:
         # unpack metadata field

@@ -46,6 +46,7 @@ from lmms_eval.utils import (
     positional_deprecated,
     run_task_tests,
     simple_parse_args_string,
+    unflatten_dict,
 )
 
 
@@ -656,6 +657,11 @@ def evaluate(
                         "arguments": filtered_arguments,
                         "resps": [req.resps for req in requests],
                         "filtered_resps": [req.filtered_resps[filter_key] for req in requests],
+                        # 取所有 requests 的 success 值，任一失败则整体为 False
+                        "success": all(
+                            getattr(req, "success", True) is not False
+                            for req in requests
+                        ),
                         "doc_hash": hash_string(
                             json.dumps(
                                 requests[0].doc,
@@ -1136,7 +1142,7 @@ def evaluate_streaming(
                     filtered_results = [inst.filtered_resps[filter_key] for inst in doc_instances]
                     
                     try:
-                        metrics = task.process_results(doc, filtered_results)
+                        metrics = task.process_results(unflatten_dict(doc), filtered_results)
                         
                         # 存储指标
                         for metric, value in metrics.items():
@@ -1165,6 +1171,10 @@ def evaluate_streaming(
                                 "arguments": filtered_arguments,
                                 "resps": [inst.resps for inst in doc_instances],
                                 "filtered_resps": [inst.filtered_resps[filter_key] for inst in doc_instances],
+                                "success": all(
+                                    getattr(inst, "success", True) is not False
+                                    for inst in doc_instances
+                                ),
                                 "doc_hash": hash_string(
                                     json.dumps(
                                         doc_instances[0].doc,

@@ -17,8 +17,6 @@ from accelerate import Accelerator, DistributedType
 from openai import OpenAI
 from concurrent.futures import as_completed
 
-WORKERS = int(os.getenv("WORKERS", "1"))
-
 @register_model("url_model")
 class URLModel(lmms):
     """
@@ -109,13 +107,14 @@ class URLModel(lmms):
                     max_tokens=gen_kwargs.get("max_new_tokens", 4096),
                 )
                 response = response.choices[0].message.content.strip()
-
+                request.success = True # Mark request as successful
                 return response
             except Exception as e:
                 eval_logger.warning(f"{doc_id}: Request failed (attempt {attempt + 1}/{self.max_retries}): {str(e)}")
                 time.sleep(2 ** attempt)  # Exponential backoff
         
         eval_logger.error(f"All attempts failed for {doc_id}")
+        request.success = False
         return "[ERROR]"
     
     def generate_until(self, request) -> str:
