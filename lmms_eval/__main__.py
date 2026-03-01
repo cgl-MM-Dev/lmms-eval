@@ -244,13 +244,6 @@ def parse_eval_args() -> argparse.Namespace:
         default="",
         help="Comma separated string arguments passed to Hugging Face Hub's log function, e.g. `hub_results_org=EleutherAI,hub_repo_name=lm-eval-results`",
     )
-    parser.add_argument(
-        "--predict_only",
-        "-x",
-        action="store_true",
-        default=False,
-        help="Use with --log_samples. Only model outputs will be saved and metrics will not be evaluated.",
-    )
     default_seed_string = "0,1234,1234,1234"
     parser.add_argument(
         "--seed",
@@ -275,9 +268,9 @@ def parse_eval_args() -> argparse.Namespace:
     parser.add_argument("--process_with_media", action="store_true", help="Whether you will process you dataset with audio, image. By default set to False" "In case some benchmarks need to be processed with media, set this flag to True.")
     parser.add_argument("--force_simple", action="store_true", help="Force the evaluation to use the simple mode of the models")
     parser.add_argument(
-        "--eval_mode",
+        "--mode",
         type=str,
-        choices=["full", "eval_only"],
+        choices=["full", "eval_only", "predict_only"],
         default="full",
         help="Evaluation mode:\n"
              "  full: Complete inference + evaluation (default)\n"
@@ -450,10 +443,10 @@ def cli_evaluate_single(args: Union[argparse.Namespace, None] = None) -> None:
             "the first few documents to console and provides limited debugging value."
         )
 
-    if args.predict_only:
+    if args.mode == "predict_only":
         args.log_samples = True
-    if (args.log_samples or args.predict_only) and not args.output_path:
-        raise ValueError("Specify --output_path if providing --log_samples or --predict_only")
+    if (args.log_samples or args.mode == "predict_only") and not args.output_path:
+        raise ValueError("Specify --output_path if providing --log_samples or mode is predict_only")
 
     if args.fewshot_as_multiturn and args.apply_chat_template is False:
         raise ValueError("If fewshot_as_multiturn is set, apply_chat_template must be set to True.")
@@ -542,7 +535,6 @@ def cli_evaluate_single(args: Union[argparse.Namespace, None] = None) -> None:
         gen_kwargs=args.gen_kwargs,
         task_manager=task_manager,
         verbosity=args.verbosity,
-        predict_only=args.predict_only,
         random_seed=args.seed[0],
         numpy_random_seed=args.seed[1],
         torch_random_seed=args.seed[2],
@@ -552,7 +544,7 @@ def cli_evaluate_single(args: Union[argparse.Namespace, None] = None) -> None:
         distributed_executor_backend="torchrun" if (torch.distributed.is_available() and torch.distributed.is_initialized()) else "accelerate",
         force_simple=args.force_simple,
         launcher_args=args.launcher_args,
-        eval_mode=args.eval_mode,
+        mode=args.mode,
         streaming_eval=args.streaming_eval,
         inference_threads=args.inference_threads,
         eval_threads=args.eval_threads,

@@ -79,7 +79,6 @@ def simple_evaluate(
     gen_kwargs: Optional[str] = None,
     task_manager: Optional[TaskManager] = None,
     verbosity: str = "INFO",
-    predict_only: bool = False,
     random_seed: int = 0,
     numpy_random_seed: int = 1234,
     torch_random_seed: int = 1234,
@@ -88,7 +87,7 @@ def simple_evaluate(
     distributed_executor_backend: str = "accelerate",
     cli_args=None,
     force_simple: bool = False,
-    eval_mode: str = "full",
+    mode: str = "full",
     streaming_eval: bool = False,
     inference_threads: int = 1,
     eval_threads: int = 2,
@@ -138,8 +137,6 @@ def simple_evaluate(
     :param gen_kwargs: str
         String arguments for model generation
         Ignored for all tasks with loglikelihood output_type
-    :param predict_only: bool
-        If true only model outputs will be generated and returned. Metrics will not be evaluated
     :param random_seed: int
         Random seed for python's random module. If set to None, the seed will not be set.
     :param numpy_random_seed: int
@@ -189,7 +186,7 @@ def simple_evaluate(
         )
 
     # 仅评估模式：强制使用虚拟模型
-    if eval_mode == "eval_only":
+    if mode == "eval_only":
         eval_logger.info("=" * 50)
         eval_logger.info("In EVAL_ONLY mode, only metrics are calculated; you must provide the model outputs yourself")
         eval_logger.info("Make sure your task YAML includes 'doc_to_answer' configuration")
@@ -197,6 +194,7 @@ def simple_evaluate(
 
         # 覆盖模型参数
         model = "virtual_model"
+        batch_size = 8
         if model_args is None:
             model_args = ""
 
@@ -257,7 +255,7 @@ def simple_evaluate(
                     if gen_kwargs is not None:
                         task_obj.set_config(key="generation_kwargs", value=gen_kwargs, update=True)
 
-                if predict_only:
+                if mode == "predict_only":
                     eval_logger.info(f"Processing {task_name} in output-only mode. Metrics will not be calculated!")
                     # we have to change the class properties post-hoc. This is pretty hacky.
                     task_obj.override_metric(metric_name="bypass")
@@ -317,7 +315,7 @@ def simple_evaluate(
             rewrite_requests_cache=rewrite_requests_cache,
             bootstrap_iters=bootstrap_iters,
             write_out=write_out,
-            log_samples=log_samples,
+            log_samples=True if mode == "predict_only" else log_samples,
             system_instruction=system_instruction,
             apply_chat_template=apply_chat_template,
             fewshot_as_multiturn=fewshot_as_multiturn,
@@ -325,7 +323,7 @@ def simple_evaluate(
             distributed_executor_backend=distributed_executor_backend,
             cli_args=cli_args,
             eval_server_launcher=None,
-            eval_mode=eval_mode,
+            mode=mode,
             inference_threads=inference_threads,
             eval_threads=eval_threads,
             checkpoint_logger=checkpoint_logger,
@@ -339,7 +337,7 @@ def simple_evaluate(
             rewrite_requests_cache=rewrite_requests_cache,
             bootstrap_iters=bootstrap_iters,
             write_out=write_out,
-            log_samples=True if predict_only else log_samples,
+            log_samples=True if mode == "predict_only" else log_samples,
             system_instruction=system_instruction,
             apply_chat_template=apply_chat_template,
             fewshot_as_multiturn=fewshot_as_multiturn,
@@ -347,7 +345,7 @@ def simple_evaluate(
             distributed_executor_backend=distributed_executor_backend,
             cli_args=cli_args,
             eval_server_launcher=eval_launcher,
-            eval_mode=eval_mode,
+            mode=mode,
         )
 
     if global_rank == 0:
@@ -410,7 +408,7 @@ def evaluate(
     verbosity: str = "INFO",
     distributed_executor_backend: str = "accelerate",
     eval_server_launcher: Optional[Union[str, Callable]] = None,
-    eval_mode: str = "full",
+    mode: str = "full",
     cli_args=None,
 ):
     """Instantiate and evaluate a model on a list of tasks.
@@ -558,7 +556,7 @@ def evaluate(
             padding_requests[reqtype] += numpad
 
     # 如果是 VirtualModel，传递任务实例
-    if eval_mode == "eval_only" and hasattr(lm, "set_parent_tasks") and callable(lm.set_parent_tasks):
+    if mode == "eval_only" and hasattr(lm, "set_parent_tasks") and callable(lm.set_parent_tasks):
         lm.set_parent_tasks(task_dict)
 
     ### Run LMM on inputs, get all outputs ###
@@ -806,7 +804,7 @@ def evaluate_streaming(
     distributed_executor_backend: str = "accelerate",
     cli_args=None,
     eval_server_launcher: Optional[Union[str, Callable]] = None,
-    eval_mode: str = "full",
+    mode: str = "full",
     inference_threads: int = 1,
     eval_threads: int = 4,
     checkpoint_logger: Optional["CheckpointLogger"] = None,
@@ -850,6 +848,10 @@ def evaluate_streaming(
 
     if distributed_executor_backend == "accelerate" and not hasattr(lm, "accelerator"):
         lm.accelerator = Accelerator()
+
+    # 如果是 VirtualModel，传递任务实例
+    if mode == "eval_only" and hasattr(lm, "set_parent_tasks") and callable(lm.set_parent_tasks):
+        lm.set_parent_tasks(task_dict)
     
     # 构建任务映射：task_name -> task_output
     task_name_to_output = {}
