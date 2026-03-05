@@ -96,6 +96,7 @@ class URLModel(lmms):
             video_kwargs["nframes"] = self.nframes
         
         messages = chat_messages.to_openai_messages(video_kwargs=video_kwargs)
+        error = None
     
         for attempt in range(self.max_retries):
             try:
@@ -110,12 +111,13 @@ class URLModel(lmms):
                 request.success = True # Mark request as successful
                 return response
             except Exception as e:
+                error = str(e)
                 eval_logger.warning(f"{doc_id}: Request failed (attempt {attempt + 1}/{self.max_retries}): {str(e)}")
                 time.sleep(2 ** attempt)  # Exponential backoff
         
         eval_logger.error(f"All attempts failed for {doc_id}")
         request.success = False
-        return "[ERROR]"
+        return f"error: {error}"
     
     def generate_until(self, request) -> str:
         """

@@ -1001,14 +1001,12 @@ def evaluate_streaming(
                         try:
                             # 将单个instance包装成列表传给模型
                             response = getattr(lm, reqtype)(instance).strip()
-                            # 检查响应是否有效
-                            if response is None or response.strip() == "" or "error" in response.strip().lower():
-                                response = f"error: invalid response"
                             instance.resps.append(response)
                             return instance
                         except Exception as e:
                             eval_logger.error(f"[Rank {RANK}] Error processing request: {e}")
                             instance.resps.append(f"error: {e}")
+                            instance.success = False
                             return instance
                     
                     # 使用线程池并发处理所有请求
@@ -1028,6 +1026,7 @@ def evaluate_streaming(
                                 instance = future_to_instance[future]
                                 eval_logger.error(f"[Rank {RANK}] Request failed: {e}")
                                 instance.resps.append(f"error: {e}")
+                                instance.success = False
                                 evaluation_queue.put(instance)
                             
                             pbar_inference.update(1)
@@ -1210,7 +1209,7 @@ def evaluate_streaming(
                     
                     try:
                         # 检查响应有效性
-                        if instance.resps[0] is None or "error" in instance.resps[0].lower() or instance.resps[0] == "":
+                        if instance.success is False:
                             eval_logger.warning(f"Skipping invalid response for doc_id={doc_id}")
                             evaluation_queue.task_done()
                             pbar_evaluation.update(1)
