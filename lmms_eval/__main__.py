@@ -244,6 +244,15 @@ def parse_eval_args() -> argparse.Namespace:
         default="",
         help="Comma separated string arguments passed to Hugging Face Hub's log function, e.g. `hub_results_org=EleutherAI,hub_repo_name=lm-eval-results`",
     )
+    parser.add_argument(
+        "--filter_list",
+        default=None,
+        help=(
+            "JSON-encoded filter_list to override all tasks' filters. "
+            "Same schema as filter_list in task YAML. "
+            "E.g. '[{\"name\": \"clean\", \"filter\": [{\"function\": \"regex\", \"regex_pattern\": \"...\"}]}]'"
+        ),
+    )
     default_seed_string = "0,1234,1234,1234"
     parser.add_argument(
         "--seed",
@@ -533,6 +542,7 @@ def cli_evaluate_single(args: Union[argparse.Namespace, None] = None) -> None:
         apply_chat_template=args.apply_chat_template,
         fewshot_as_multiturn=args.fewshot_as_multiturn,
         gen_kwargs=args.gen_kwargs,
+        filter_list=args.filter_list,
         task_manager=task_manager,
         verbosity=args.verbosity,
         random_seed=args.seed[0],

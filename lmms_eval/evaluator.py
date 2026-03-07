@@ -77,6 +77,7 @@ def simple_evaluate(
     apply_chat_template: bool = False,
     fewshot_as_multiturn: bool = False,
     gen_kwargs: Optional[str] = None,
+    filter_list: Optional[str] = None,
     task_manager: Optional[TaskManager] = None,
     verbosity: str = "INFO",
     random_seed: int = 0,
@@ -259,6 +260,19 @@ def simple_evaluate(
                     eval_logger.info(f"Processing {task_name} in output-only mode. Metrics will not be calculated!")
                     # we have to change the class properties post-hoc. This is pretty hacky.
                     task_obj.override_metric(metric_name="bypass")
+
+                # 覆盖任务的 filter_list 配置，如果命令行提供了 filter_list 参数
+                if filter_list is not None:
+                    import json as _json
+                    parsed = _json.loads(filter_list) if isinstance(filter_list, str) else filter_list
+                    task_obj.set_config(key="filter_list", value=parsed)
+                    # 同步重建 _filters
+                    from lmms_eval.filters import build_filter_ensemble
+                    task_obj._filters = []
+                    for fc in parsed:
+                        components = [[fn["function"], {k: v for k, v in fn.items() if k != "function"}] for fn in fc["filter"]]
+                        task_obj._filters.append(build_filter_ensemble(fc["name"], components))
+                    eval_logger.info(f"Overriding filter_list for task {task_name}")
 
                 # override tasks' fewshot values to the provided num_fewshot arg value
                 # except if tasks have it set to 0 manually in their configs--then we should never overwrite that
@@ -977,8 +991,9 @@ def evaluate_streaming(
         total_requests = len(cloned_reqs)
         
         # 创建共享队列
-        max_queue_size = max(100, total_requests // 10)  # 最多缓存10%的结果
-        evaluation_queue = queue.Queue(maxsize=max_queue_size)
+        # max_queue_size = max(100, total_requests // 10)  # 最多缓存10%的结果
+        # evaluation_queue = queue.Queue(maxsize=max_queue_size)
+        evaluation_queue = queue.Queue()
 
         # ========== 推理线程：批量推理，结果放入队列 ==========
         def inference_worker():

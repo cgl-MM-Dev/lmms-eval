@@ -106,6 +106,8 @@ def build_model_args(model_cfg: dict[str, Any]) -> str:
     gen_kwargs_parts = []
 
     for key, value in model_cfg.items():
+        if key == "filter_list":
+            continue  # filter_list 通过专门参数传递，不放在 model_args 中
         if key in gen_kwargs_fields:
             gen_kwargs_parts.append(f"{key}={value}")
             continue
@@ -220,6 +222,12 @@ def build_command(
     # ── 输出路径 ──────────────────────────────────────────────
     model_output_path = str(Path(output_path) / model_name)
     cmd.extend(["--output_path", model_output_path])
+
+    # ── 过滤器覆盖 ────────────────────────────────────────────
+    filter_list = model_cfg.get("filter_list")
+    if filter_list is not None:
+        import json as _json
+        cmd.extend(["--filter_list", _json.dumps(filter_list)])
 
     # ── 种子参数 ──────────────────────────────────────────────
     if "seed" in config:
