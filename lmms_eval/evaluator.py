@@ -641,7 +641,14 @@ def evaluate(
             pbar = tqdm(total=total_docs, desc=f"Postprocessing", disable=(RANK != 0))
             for doc_id, doc in doc_iterator:
                 requests = instances_by_doc_id[doc_id]
-                metrics = task.process_results(doc, [req.filtered_resps[filter_key] for req in requests])
+                try:
+                    metrics = task.process_results(doc, [req.filtered_resps[filter_key] for req in requests])
+                    eval_success = True
+                except Exception as e:
+                    eval_logger.error(f"Error in process_results for doc_id={doc_id}: {e}")
+                    metrics = {}
+                    eval_success = False
+
                 if log_samples:
                     target = task.doc_to_target(doc)
                     saved_doc = {}
@@ -661,7 +668,7 @@ def evaluate(
                                 filtered_arguments.append(value)
                             # else:
                             #     filtered_arguments.append(_handle_non_serializable(value))
-
+                    infer_success = all(getattr(req, "success", True) is not False for req in requests)
                     example = {
                         "doc_id": doc_id,
                         "doc": saved_doc,
@@ -670,10 +677,7 @@ def evaluate(
                         "resps": [req.resps for req in requests],
                         "filtered_resps": [req.filtered_resps[filter_key] for req in requests],
                         # 取所有 requests 的 success 值，任一失败则整体为 False
-                        "success": all(
-                            getattr(req, "success", True) is not False
-                            for req in requests
-                        ),
+                        "success": infer_success and eval_success,
                         "doc_hash": hash_string(
                             json.dumps(
                                 requests[0].doc,
@@ -686,8 +690,9 @@ def evaluate(
                     }
                     example.update(metrics)
                     task_output.logged_samples.append(example)
-                for metric, value in metrics.items():
-                    task_output.sample_metrics[(metric, filter_key)].append(value)
+                if eval_success:
+                    for metric, value in metrics.items():
+                        task_output.sample_metrics[(metric, filter_key)].append(value)
                 pbar.update(1)
 
             pbar.close()
@@ -1157,57 +1162,60 @@ def evaluate_streaming(
                 for filter_key in doc_instances[0].filtered_resps.keys():
                     filtered_results = [inst.filtered_resps[filter_key] for inst in doc_instances]
                     
+                    # 计算指标
                     try:
                         metrics = task.process_results(unflatten_dict(doc), filtered_results)
-                        
-                        # 存储指标
-                        for metric, value in metrics.items():
-                            task_output.sample_metrics[(metric, filter_key)].append(value)
-                        
-                        if log_samples:
-                            target = task.doc_to_target(doc)
-                            saved_doc = {}
-                            for key, value in doc.items():
-                                if "image" not in key:
-                                    if isinstance(value, dict) and "array" in value:
-                                        continue
-                                    else:
-                                        saved_doc[key] = value
-                            
-                            filtered_arguments = []
-                            for inst in doc_instances:
-                                for value in inst.args:
-                                    if isinstance(value, (str, int, float, bool, list, dict, type(None))):
-                                        filtered_arguments.append(value)
-                            
-                            example = {
-                                "doc_id": doc_id,
-                                "doc": saved_doc,
-                                "target": target,
-                                "arguments": filtered_arguments,
-                                "resps": [inst.resps for inst in doc_instances],
-                                "filtered_resps": [inst.filtered_resps[filter_key] for inst in doc_instances],
-                                "success": all(
-                                    getattr(inst, "success", True) is not False
-                                    for inst in doc_instances
-                                ),
-                                "doc_hash": hash_string(
-                                    json.dumps(
-                                        doc_instances[0].doc,
-                                        indent=2,
-                                        default=handle_non_serializable,
-                                        ensure_ascii=False,
-                                    )
-                                ),
-                            }
-                            example.update(metrics)
-                            task_output.logged_samples.append(example)
-
-                            if checkpoint_logger:
-                                checkpoint_logger.log_sample(task_name, example, filter_key)
-                        
+                        eval_success = True
                     except Exception as e:
                         eval_logger.error(f"[Rank {RANK}] Error processing doc_id {doc_id} for task {task_name}: {e}")
+                        metrics = {}
+                        eval_success = False
+                        
+                    # 存储正确计算的指标
+                    if eval_success:
+                        for metric, value in metrics.items():
+                            task_output.sample_metrics[(metric, filter_key)].append(value)
+                    
+                    if log_samples:
+                        target = task.doc_to_target(doc)
+                        saved_doc = {}
+                        for key, value in doc.items():
+                            if "image" not in key:
+                                if isinstance(value, dict) and "array" in value:
+                                    continue
+                                else:
+                                    saved_doc[key] = value
+                        
+                        filtered_arguments = []
+                        for inst in doc_instances:
+                            for value in inst.args:
+                                if isinstance(value, (str, int, float, bool, list, dict, type(None))):
+                                    filtered_arguments.append(value)
+
+                        infer_success = all(getattr(inst, "success", True) is not False for inst in doc_instances)    
+                        example = {
+                            "doc_id": doc_id,
+                            "doc": saved_doc,
+                            "target": target,
+                            "arguments": filtered_arguments,
+                            "resps": [inst.resps for inst in doc_instances],
+                            "filtered_resps": [inst.filtered_resps[filter_key] for inst in doc_instances],
+                            "success": infer_success and eval_success,
+                            "doc_hash": hash_string(
+                                json.dumps(
+                                    doc_instances[0].doc,
+                                    indent=2,
+                                    default=handle_non_serializable,
+                                    ensure_ascii=False,
+                                )
+                            ),
+                        }
+                        example.update(metrics)
+                        task_output.logged_samples.append(example)
+
+                        if checkpoint_logger:
+                            checkpoint_logger.log_sample(task_name, example, filter_key)
+                        
                 
 
             # 使用线程池处理评估任务
