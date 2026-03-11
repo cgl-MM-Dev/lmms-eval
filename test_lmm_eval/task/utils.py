@@ -44,6 +44,9 @@ except ImportError:
 #     _JUDGE_MODEL_INSTANCE = get_server(api_type, config=server_config)
 #     return _JUDGE_MODEL_INSTANCE
 
+# 直接在模块加载时初始化LLM Judge实例
+judge_server = get_judge_model("qwen_judge")
+
 nlg_type = ["BLEU", "ROUGE", "METEOR", "BERTScore"]
 
 def doc_to_text(doc, lmms_eval_specific_kwargs=None):
@@ -148,7 +151,6 @@ def process_results(doc, results):
     pred_ans = results[0].split("<answer>")[-1].split("</answer>")[0].strip()
     gt_ans = doc_to_answer(doc).split("<answer>")[-1].split("</answer>")[0].strip()
 
-    judge_server = get_judge_model("qwen_judge")
     if judge_server:
         eval_logger.info("Using LLM Judge for evaluation...")
         # Customize this depending on your evaluation setup context

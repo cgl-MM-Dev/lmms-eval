@@ -8,7 +8,7 @@
             "model_type": "url_model",
             "base_url": "https://www.dmxapi.cn/v1",
             "api_key": "sk-owfn9uCx1bEqs8wQXtE6Rpfesebn8PD33xFLIEQncNDogtfa",
-            "model_name": "qwen3.5-plus-2026-02-15"
+            "model_name": "qwen3.5-plus"
         }
     },
     "llm_judge": {
