@@ -1,0 +1,33 @@
+{
+    "task_name": "task1",
+    "task_path": "/Users/sunnyblack/Desktop/lmms-eval/test_lmm_eval/task",
+    "inference_only": false,
+    "evaluate_only": false,
+    "model_config": {
+        "qwen": {
+            "model_type": "url_model",
+            "base_url": "https://www.dmxapi.cn/v1",
+            "api_key": "sk-owfn9uCx1bEqs8wQXtE6Rpfesebn8PD33xFLIEQncNDogtfa",
+            "model_name": "qwen3.5-plus-2026-02-15"
+        }
+    },
+    "llm_judge": {
+        "qwen_judge":{
+            "api_type": "openai",
+            "model_name": "qwen3.5-35b-a3b",
+            "api_key": "sk-owfn9uCx1bEqs8wQXtE6Rpfesebn8PD33xFLIEQncNDogtfa",
+            "base_url": "https://www.dmxapi.cn/v1",
+            "temperature": 0.0,
+            "max_tokens": 1024,
+            "top_p": 0.8
+        }
+    },
+    "streaming_eval": true,
+    "inference_threads": 1,
+    "eval_threads": 2,
+    "batch_size": 1,
+    "log_samples": true,
+    "enable_checkpointing": true,
+    "checkpoint_interval": 1,
+    "output_path": "/Users/sunnyblack/Desktop/lmms-eval/test_lmm_eval/result"
+}
