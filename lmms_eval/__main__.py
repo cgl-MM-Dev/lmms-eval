@@ -452,11 +452,7 @@ def cli_evaluate_single(args: Union[argparse.Namespace, None] = None) -> None:
             "the first few documents to console and provides limited debugging value."
         )
 
-<<<<<<< HEAD
     if args.mode == "predict_only" or args.enable_checkpointing:
-=======
-    if args.mode == "predict_only":
->>>>>>> f13e9efa56c63be3388515eb26ddbf897a3b6d39
         args.log_samples = True
     if (args.log_samples or args.mode == "predict_only") and not args.output_path:
         raise ValueError("Specify --output_path if providing --log_samples or mode is predict_only")
@@ -559,11 +555,7 @@ def cli_evaluate_single(args: Union[argparse.Namespace, None] = None) -> None:
         force_simple=args.force_simple,
         launcher_args=args.launcher_args,
         mode=args.mode,
-<<<<<<< HEAD
         streaming_eval=args.streaming_eval or args.enable_checkpointing,
-=======
-        streaming_eval=args.streaming_eval,
->>>>>>> f13e9efa56c63be3388515eb26ddbf897a3b6d39
         inference_threads=args.inference_threads,
         eval_threads=args.eval_threads,
         enable_checkpointing=args.enable_checkpointing,

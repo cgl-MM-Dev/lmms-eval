@@ -99,10 +99,7 @@ AVAILABLE_CHAT_TEMPLATE_MODELS = {
     "longvila": "LongVila",
     "llava_onevision1_5": "Llava_OneVision1_5",
     "url_model" : "URLModel",
-<<<<<<< HEAD
     "url_model_new" : "URLModelNew",
-=======
->>>>>>> f13e9efa56c63be3388515eb26ddbf897a3b6d39
 }
 
 def get_model(model_name, force_simple: bool = False):
