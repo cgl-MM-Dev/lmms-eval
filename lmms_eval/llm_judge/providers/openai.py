@@ -56,7 +56,6 @@ class OpenAIProvider(ServerInterface):
         if config.top_p is not None:
             payload["top_p"] = config.top_p
 
-
         if config.response_format == "json":
             payload["response_format"] = {"type": "json_object"}
 

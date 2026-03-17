@@ -31,6 +31,7 @@ class VirtualModel(lmms):
         self._rank = 0
         self._world_size = 1
         
+<<<<<<< HEAD
         # 提取模型名称用于缓存目录命名，保持与实际模型一致
         model_name = "virtual_model"
         for key in ["peft", "delta", "pretrained", "model", "model_version", "model_name", "model_id", "path", "engine"]:
@@ -39,6 +40,8 @@ class VirtualModel(lmms):
                 break
         self.model_name = model_name
         
+=======
+>>>>>>> f13e9efa56c63be3388515eb26ddbf897a3b6d39
         # 存储任务实例的引用
         self._parent_tasks = {}
         

@@ -823,7 +823,11 @@ def execute_code_in_sandbox(
         return (
             [],
             "",
+<<<<<<< HEAD
             (f"Sandbox for {id}: Code contains potentially dangerous system operations " "such as remove. Execution denied.",),
+=======
+            (f"Sandbox for {item_id}: Code contains potentially dangerous system operations " "such as remove. Execution denied.",),
+>>>>>>> f13e9efa56c63be3388515eb26ddbf897a3b6d39
             None,
         )
 

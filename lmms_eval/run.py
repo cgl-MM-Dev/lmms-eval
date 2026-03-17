@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import argparse
 import json
+<<<<<<< HEAD
 import os
+=======
+>>>>>>> f13e9efa56c63be3388515eb26ddbf897a3b6d39
 import subprocess
 import sys
 from pathlib import Path
@@ -79,7 +82,10 @@ def build_model_args(model_cfg: dict[str, Any]) -> str:
         "base_url": "base_url",
         "api_key": "api_key",
         "model_name": "model_name",
+<<<<<<< HEAD
         "nframe": "nframes",
+=======
+>>>>>>> f13e9efa56c63be3388515eb26ddbf897a3b6d39
         # 本地模型常用字段
         "pretrained": "pretrained",
         "tensor_parallel_size": "tensor_parallel_size",
@@ -278,12 +284,16 @@ def run_evaluation(config_path: str, dry_run: bool = False) -> int:
             print("⚠️  dry_run 模式，跳过实际执行。")
             continue
 
+<<<<<<< HEAD
         # Extract judge config and pass through environment
         env = os.environ.copy()
         if "llm_judge" in config:
             env["LLM_JUDGE_CONFIG"] = json.dumps(config["llm_judge"])
 
         result = subprocess.run(cmd, check=False, env=env)
+=======
+        result = subprocess.run(cmd, check=False)
+>>>>>>> f13e9efa56c63be3388515eb26ddbf897a3b6d39
 
         if result.returncode != 0:
             print(
