@@ -79,6 +79,7 @@ def build_model_args(model_cfg: dict[str, Any]) -> str:
         "base_url": "base_url",
         "api_key": "api_key",
         "model_name": "model_name",
+        "nframe": "nframes",
         # 本地模型常用字段
         "pretrained": "pretrained",
         "tensor_parallel_size": "tensor_parallel_size",

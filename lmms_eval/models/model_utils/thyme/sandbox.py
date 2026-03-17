@@ -473,7 +473,7 @@ def _sandboxed_execution_target(
     code_to_execute,
     input_image_path,
     temp_output_dir,
-    item_id,
+    id,
     previous_execution_context=None,
 ):
     """
@@ -589,12 +589,12 @@ def _sandboxed_execution_target(
             code_to_execute = dedented_code
             formatted_code = autopep8.fix_code(code_to_execute, options={"aggressive": 2})
             # if formatted_code.strip() != code_to_execute.strip():
-            #     print(f"INFO: Attempted to auto-format code for {item_id} using autopep8.")
+            #     print(f"INFO: Attempted to auto-format code for {id} using autopep8.")
             code_to_execute = formatted_code
         except Exception:
             pass
     else:
-        # print(f"INFO: autopep8 not available, skipping auto-formatting for {item_id}.", file=sys.stderr)
+        # print(f"INFO: autopep8 not available, skipping auto-formatting for {id}.", file=sys.stderr)
         pass
 
     # ... (AST transformations: ImagePathTransformer, CropCoordinateTransformer, OpenCVNamespaceTransformer) ...
@@ -714,10 +714,10 @@ def _sandboxed_execution_target(
             if isinstance(processed_path_from_code, str) and processed_path_from_code.startswith(temp_output_dir) and os.path.isfile(processed_path_from_code):
                 processed_paths_list.append(processed_path_from_code)
             elif isinstance(processed_path_from_code, str) and processed_path_from_code.startswith(temp_output_dir) and not os.path.exists(processed_path_from_code):
-                error_msg = f"Sandbox for {item_id}: 'processed_path' variable set to " f"'{processed_path_from_code}', but file does not exist."
+                error_msg = f"Sandbox for {id}: 'processed_path' variable set to " f"'{processed_path_from_code}', but file does not exist."
                 processed_path_from_code = None
             elif processed_path_from_code is not None:
-                error_msg = f"Sandbox for {item_id}: 'processed_path' variable was " f"'{processed_path_from_code}', which is not a valid file path in {temp_output_dir}."
+                error_msg = f"Sandbox for {id}: 'processed_path' variable was " f"'{processed_path_from_code}', which is not a valid file path in {temp_output_dir}."
                 processed_path_from_code = None
         # print(full_print_output)
         if full_print_output:
@@ -732,7 +732,7 @@ def _sandboxed_execution_target(
                     if potential_path_from_print not in processed_paths_list:
                         processed_paths_list.append(potential_path_from_print)
                 elif not error_msg:
-                    possible_error_msg = f"Sandbox for {item_id}: Path '{potential_path_from_print}' " "found in print, but file does not exist or is not a file."
+                    possible_error_msg = f"Sandbox for {id}: Path '{potential_path_from_print}' " "found in print, but file does not exist or is not a file."
             if len(processed_paths_list) == 0:
                 if num_parse_images == len(possible_image_path_list):
                     processed_paths_list = possible_image_path_list
@@ -751,22 +751,22 @@ def _sandboxed_execution_target(
                     pass
 
     except ImportError as e:
-        error_msg = f"Sandbox for {item_id}: Code execution failed due to ImportError. " f"Ensure all required modules are available and correctly named: {e}"
+        error_msg = f"Sandbox for {id}: Code execution failed due to ImportError. " f"Ensure all required modules are available and correctly named: {e}"
         if "cv2" in str(e).lower() and not cv2:
             error_msg += f"(Note: cv2 was not available in the sandbox host environment): {e}"
     except MemoryError as e:
-        error_msg = f"Sandbox for {item_id}: Code execution failed due to MemoryError. " f"The operation likely consumed too much memory: {e}"
+        error_msg = f"Sandbox for {id}: Code execution failed due to MemoryError. " f"The operation likely consumed too much memory: {e}"
     except SyntaxError as e:  # Catch syntax errors from exec itself
-        error_msg = f"Sandbox for {item_id}: Code execution failed due to SyntaxError: {e}"
+        error_msg = f"Sandbox for {id}: Code execution failed due to SyntaxError: {e}"
     except Exception as e:
-        error_msg = f"Sandbox for {item_id}: Code execution failed: {e}"
+        error_msg = f"Sandbox for {id}: Code execution failed: {e}"
 
     return_dict["processed_paths_list"] = processed_paths_list
     return_dict["print_output"] = full_print_output
     return_dict["error"] = error_msg
 
     if full_print_output is not None and not processed_paths_list:
-        error_msg = f"Sandbox for {item_id}: Path/result output error, unable to match save path"
+        error_msg = f"Sandbox for {id}: Path/result output error, unable to match save path"
 
     picklable_variables = {}
     imports_to_persist = {}
@@ -799,7 +799,7 @@ def _sandboxed_execution_target(
 def execute_code_in_sandbox(
     code_to_execute,
     input_image_path,
-    item_id="N/A",
+    id="N/A",
     temp_output_dir=None,
     previous_execution_context=None,
 ):
@@ -809,7 +809,7 @@ def execute_code_in_sandbox(
     Args:
         code_to_execute (str): The Python code string to execute.
         input_image_path (str): Path to the user image.
-        item_id (str): Identifier for logging.
+        id (str): Identifier for logging.
         temp_output_dir (str): Directory for processed images.
         previous_execution_context (dict, optional): Context from a previous execution.
 
@@ -823,7 +823,7 @@ def execute_code_in_sandbox(
         return (
             [],
             "",
-            (f"Sandbox for {item_id}: Code contains potentially dangerous system operations " "such as remove. Execution denied.",),
+            (f"Sandbox for {id}: Code contains potentially dangerous system operations " "such as remove. Execution denied.",),
             None,
         )
 
@@ -835,7 +835,7 @@ def execute_code_in_sandbox(
                 code_to_execute,
                 input_image_path,
                 temp_output_dir,
-                item_id,
+                id,
                 previous_execution_context,
             )
 
@@ -847,7 +847,7 @@ def execute_code_in_sandbox(
 
         except timeout_decorator.TimeoutError:
             # Handle the timeout gracefully
-            error_msg = f"Sandbox for {item_id}: Execution timed out after {EXEC_TIME_LIMIT} seconds."
+            error_msg = f"Sandbox for {id}: Execution timed out after {EXEC_TIME_LIMIT} seconds."
             print(error_msg)
             processed_paths_list = []
             full_print_output = ""
