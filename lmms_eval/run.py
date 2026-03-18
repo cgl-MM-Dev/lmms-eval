@@ -80,6 +80,12 @@ def build_model_args(model_cfg: dict[str, Any]) -> str:
         "api_key": "api_key",
         "model_name": "model_name",
         "nframe": "nframes",
+        "timeout": "timeout",
+        "max_retries": "max_retries",
+        "batch_size": "batch_size",
+        "max_pixels": "max_pixels",
+        "min_image_pixels": "min_image_pixels",
+        "fps": "fps",
         # 本地模型常用字段
         "pretrained": "pretrained",
         "tensor_parallel_size": "tensor_parallel_size",
