@@ -1,0 +1,5 @@
+group: scigen_verify_bench_v3
+task:
+  - scigen_verify_knowledge
+  - scigen_verify_reasoning
+  - scigen_verify_instruction_following

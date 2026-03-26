@@ -1,0 +1,22 @@
+{
+    "task_name": "scigen_verify_bench_v3",
+    "task_path": "/home/devdata/Dataset/SciGen-Verify/benchmark/wzq/lmms-eval/Sci_verifier/task_Gemini",
+    "inference_only": false,
+    "evaluate_only": false,
+    "model_config": {
+        "dmx_api_model": {
+            "model_type": "url_model",
+            "base_url": "https://ark.cn-beijing.volces.com/api/v3/",
+            "api_key": "sk-gSitTfg3Qsq0FyqPW1dezCxeUxAW3Q0zAVQSDl3buY06kO2Y",
+            "model_name": "gemini-3-flash-preview"
+        }
+    },
+    "streaming_eval": true,
+    "inference_threads": 16,
+    "eval_threads": 16,
+    "batch_size": 1,
+    "log_samples": true,
+    "enable_checkpointing": true,
+    "checkpoint_interval": 1,
+    "output_path": "/home/devdata/Dataset/SciGen-Verify/benchmark/wzq/lmms-eval/Sci_verifier_output_new/test6_gemini-3-flash-preview"
+}
