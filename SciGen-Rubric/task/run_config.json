@@ -1,0 +1,22 @@
+{
+    "task_name": "rubric", 
+    "task_path": "/home/cike/LSR/lmms-eval/SciGen-Rubric/task",
+    "inference_only": false,
+    "evaluate_only": false,
+    "model_config": {
+        "generator_model": {
+            "model_type": "url_model",
+            "base_url": "https://api.siliconflow.cn/v1",
+            "api_key": "sk-wgtericorqbozvzydzdcmbpxfvtlyfhcbbkuokkkpdkwmuqg",
+            "model_name": "Qwen/Qwen3.5-9B"
+        }
+    },
+    "streaming_eval": true,
+    "inference_threads": 30,
+    "eval_threads": 30,
+    "batch_size": 1,
+    "log_samples": true,
+    "enable_checkpointing": true,
+    "checkpoint_interval": 1,
+    "output_path": "/home/cike/LSR/bench_rubric/experiment/output"
+}
