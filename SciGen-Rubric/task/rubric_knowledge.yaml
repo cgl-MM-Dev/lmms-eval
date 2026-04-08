@@ -1,0 +1,26 @@
+task: "rubric_knowledge"
+dataset_path: json
+dataset_kwargs:
+  data_files: "/home/cike/LSR/bench_rubric/experiment/Knowledge.jsonl"
+test_split: train
+output_type: generate_until
+doc_to_text: !function utils.doc_to_text
+doc_to_messages: !function utils.doc_to_messages
+doc_to_target: "answer"
+generation_kwargs:
+  max_new_tokens: 30000
+  temperature: 0.1
+  top_p: 0.9
+  num_beams: 1
+  do_sample: false
+process_results: !function utils.process_results
+metric_list:
+  - metric: RubricRecall
+    aggregation: !function utils.aggregate_rubric_recall
+    higher_is_better: true
+  - metric: HallucinationRate
+    aggregation: !function utils.aggregate_hallucination_rate
+    higher_is_better: false
+  - metric: StructuralF1
+    aggregation: !function utils.aggregate_structural_f1
+    higher_is_better: true

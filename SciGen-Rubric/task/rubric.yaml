@@ -1,0 +1,5 @@
+group: rubric
+task:
+  - rubric_instruction_following
+  - rubric_knowledge
+  - rubric_reasoning
